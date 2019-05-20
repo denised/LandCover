@@ -1,14 +1,17 @@
 import rasterio
+from rasterio import windows
 import numpy as np
 from pathlib import Path
 from . import coords
 from . import bands
 
-# The home of the original corine dataset, as a single tif
-corine_original = "/home/firewise/corine/corine.tif"
-# The directory where we keep reprojections of the corine dataset into UTM, to match Landsat
-# These reprojections will be created on demand
-corine_reprojected_directory = Path("/home/firewise/corine")
+
+#The directory where we keep the corine dataset, projected into UTM
+corine_directory = Path("/home/firewise/corine")
+
+def set_corine_directory(p):
+    global corine_directory
+    corine_directory = p
 
 def bi(srcname,band):
     # syntactic sugar to make the code more readable
@@ -16,7 +19,7 @@ def bi(srcname,band):
     src = bands.LANDSAT_BANDS if srcname == 'landsat' else bands.CORINE_BANDS
     return bands.band_index(src,band) 
 
-def corine_merge(lsdat,region):
+def corine_merge(lsdat, region:windows.Window):
     """Merge a region of a landsat tile with its equivalent region of the Corine dataset to create a src, target pair for learning.
 
     lsdat: a rasterio dataset object for a landsat tile
@@ -46,11 +49,17 @@ def corine_merge(lsdat,region):
 
     ls_data = np.delete(ls_data, bi('landsat','qa'), axis=0)  # we're done with the qa band
 
-    # Make sure that NODATA is consistent between the two
+    # Figure out the combined NODATA
     ls_nodata = (qa == 0)  # for some reason mask bit isn't always there, 
                            # but this works
     c_nodata = c_data[ bi('corine','mask') ]
     either_nodata = np.logical_or(ls_nodata, np.logical_not(c_nodata))
+
+    # if there is *no* common data, this isn't a good dataset to use; return None
+    # TODO: could do some of this testing earlier, for efficiency
+    if all(either_nodata):
+        print('skipping')
+        return None
     
     if np.any(ls_nodata):  # propagate to corine
         c_data[:, either_nodata] = 0
@@ -78,7 +87,7 @@ def fetch_corine(crs):
             return corine
 
     # Do we already have a saved reprojection?
-    corine_name = corine_reprojected_directory / ("corine_" + epsg + ".tif")
+    corine_name = corine_directory / ("corine_" + epsg + ".tif")
     if not corine_name.exists():
         raise Exception('Corine projection {} not found!'.format(epsg)) 
     
