@@ -1,5 +1,6 @@
 from typing import *
 import torch
+import torch.utils.data
 import numpy
 import itertools
 import rasterio
@@ -8,13 +9,16 @@ import rasterio
 
 # The type of a labeler callback.
 Labeler = Callable[[rasterio.io.DatasetReader,rasterio.windows.Window],Optional[Tuple[numpy.ndarray,numpy.ndarray]]]
+   
 
-class WindowedDataset(torch.utils.data.Dataset):
-    def __init__(self, images:Iterable[str], labeler:Labeler, window_size:int=256, size:int=65535):
+class WindowedDataset(torch.utils.data.dataset.Dataset):
+    def __init__(self, images:Iterable[str], labeler:Labeler, c:int, classes:Tuple[str], window_size:int=256, size:int=65535):
         """
         images: an iterable that returns paths to the satellite tiles (in any format accepted by rasterio.open)
         labeler: func(rasterio_dataset, window) -> (x,y) or None
             A function that produces the x and y values for the specific window, or None if this window should be skipped
+        c, classes: the attributes required by fastai
+        channels: the number of output channels per pixel
         window_size: generate windows of data of this size (ws x ws pixels).  Will perform best if window size == tif block size
         size: typically we won't know how many samples we will produce.  size is what we return when asked this impertinent question.
         """
@@ -24,6 +28,12 @@ class WindowedDataset(torch.utils.data.Dataset):
         self.im = None
         self.im_iter = itertools.cycle(images)
         self.curr_image: Optional[rasterio.io.DatasetReader] = None
+        self.c = c
+        self.classes = classes
+    
+    def as_loader(self, bs=12, num_workers=0) -> torch.utils.data.DataLoader:
+        """Return an appropriate DataLoader for this Dataset"""
+        return torch.utils.data.DataLoader(self, batch_size=bs, num_workers=num_workers)
 
     """For performance reasons, we completely subvert the random access API of Dataset.
     Every call to __getitem__ will get the next item in the list, ignoring the requested index"""
@@ -58,7 +68,7 @@ class WindowedDataset(torch.utils.data.Dataset):
     def __getitem__(self, index=0):
         # Completely ignore index.
         return self.next_sample()
-
+    
 
 def window_iterator(full_size, window_size, stride=0) -> Iterator[rasterio.windows.Window]:
     """Return windows of size window_size over an array of size full_size.

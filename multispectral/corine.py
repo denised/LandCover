@@ -19,7 +19,12 @@ def bi(srcname,band):
     src = bands.LANDSAT_BANDS if srcname == 'landsat' else bands.CORINE_BANDS
     return bands.band_index(src,band) 
 
-def corine_merge(lsdat, region:windows.Window):
+def corine_attributes():
+    """Return the c and classes attributes required by fastai"""
+    cs = bands.CORINE_BANDS
+    return (len(cs), cs)
+
+def corine_labeler(lsdat, region:windows.Window):
     """Merge a region of a landsat tile with its equivalent region of the Corine dataset to create a src, target pair for learning.
 
     lsdat: a rasterio dataset object for a landsat tile
@@ -57,8 +62,8 @@ def corine_merge(lsdat, region:windows.Window):
 
     # if there is *no* common data, this isn't a good dataset to use; return None
     # TODO: could do some of this testing earlier, for efficiency
-    if all(either_nodata):
-        print('skipping')
+    if either_nodata.all():
+        #print('skipping')
         return None
     
     if np.any(ls_nodata):  # propagate to corine
@@ -67,8 +72,9 @@ def corine_merge(lsdat, region:windows.Window):
     if np.any(c_nodata):   # propagate to tile
         ls_data[:, either_nodata] = 0
     
-    return ls_data, c_data
-
+    # finally convert to 0..1 floats
+    # both ls and c data are bytes with full range.
+    return (ls_data/255.0, c_data/255.0)
 
 _corine_open_datasets = {}
 
