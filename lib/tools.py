@@ -1,6 +1,4 @@
-import rasterio
 import numpy as np
-from tqdm import tqdm
 from matplotlib import pyplot
 from pathlib import Path
 
@@ -50,7 +48,7 @@ def plotsize(nrows, ncols, basesize=20):
     # "20" seems to be a good width for a jupyter screen, for some reason
     # ncols then sets the overall (sub)figure size, and the calculation detemines
     # the height needed to accomodate that.  Assumes approximately square tiles.
-    return (20, (20//ncols) * nrows)
+    return (basesize, (basesize//ncols) * nrows)
 
 def showbands(filep, ncols=3, basesize=20, level=64):
     """Show all the bands in a geotiff file pointer as subplots.  Automatically resizes them down by
