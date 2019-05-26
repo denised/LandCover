@@ -1,7 +1,6 @@
 import requests
 import os
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
 
 usgs_host = 'https://espa.cr.usgs.gov/api/v0'
 storage_directory = "/home/usgs/landsat5"
@@ -46,15 +45,15 @@ def submit_order(list_of_ids):
     return data['orderid']
 
 
-def get_order_status(id):
+def get_order_status(order_id):
     s = get_session()
-    response = s.get(usgs_host+'/order-status/'+id)
+    response = s.get(usgs_host+'/order-status/'+order_id)
     response.raise_for_status()
     data = response.json()
     return data['status']
 
-# copied directly from the epsg code
-valid_statuses = ['complete', 'queued', 'oncache', 'onorder', 'purged',
+# copied directly from the epsg code... and wrong! (added 'ordered' status)
+valid_statuses = ['ordered', 'complete', 'queued', 'oncache', 'onorder', 'purged',
                       'processing', 'error', 'unavailable', 'submitted']
 all_but_purged = valid_statuses[:]
 all_but_purged.remove('purged')
@@ -92,13 +91,11 @@ def download_available_results():
     downloaded."""
     s = get_session()
     orders = get_open_orders()
-    with ThreadPoolExecutor(max_workers=5) as pool:
-        # There's a double loop here: given each order name, fetch the status of all its items
-        # for each item, download it (or not).  We keep the first loop on the main thread, for
-        # simplicity, and use the thread pool for the actual downloads.
-        for orderid in orders:
-            response = s.get(usgs_host+'/item-status/'+orderid, json={"status": "complete"})
-            response.raise_for_status()
-            for item in response[orderid]:
-                pool.submit(process_item,item)
+    # usgs doesn't like it if you download in parallel, so we don't any more
+    for orderid in orders:
+        response = s.get(usgs_host+'/item-status/'+orderid, json={"status": "complete"})
+        response.raise_for_status()
+        data = response.json()
+        for item in data[orderid]:
+            process_item(item)
     print("download complete")

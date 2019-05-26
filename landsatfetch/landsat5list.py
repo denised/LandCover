@@ -1,3 +1,8 @@
+# These were generated on GEE by intersecting landsat with a polygon roughly outlining
+# the Corine shape.  They were also selected for low cloud (< 15% I think), which might not
+# be necessary
+
+
 potential_tiles = [
   "LT05_L1TP_167036_20060529_20161121_01_T1",
   "LT05_L1TP_167036_20060716_20161120_01_T1",
