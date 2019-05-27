@@ -35,7 +35,7 @@ def corine_attributes():
     cs = bands.CORINE_BANDS
     return (len(cs), cs)
 
-def corine_labeler(lsdat, region:windows.Window):
+def corine_labeler(lsdat:rasterio.io.DatasetReader, region:windows.Window):
     """Merge a region of a landsat tile with its equivalent region of the Corine dataset to create a src, target pair for learning.
 
     lsdat: a rasterio dataset object for a landsat tile
@@ -106,7 +106,7 @@ def corine_labeler(lsdat, region:windows.Window):
 
 _corine_open_datasets = {}
 
-def fetch_corine(crs):
+def fetch_corine(crs) -> rasterio.io.DatasetReader:
     """Return a rasterio dataset for Corine reprojected into the specified crs."""
 
     epsg = str(crs.to_epsg())

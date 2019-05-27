@@ -11,12 +11,22 @@ GeoWindow = coords.BoundingBox
 # Rasterio has a class Window that represents spans of a dataset in pixel space,
 # and a class BoundingBox that can represents a span in Geo Space.
 # Here we add some utility functions for using them and converting between them
-# One thing to keep in mind is that the y direction is opposite:
-# Geo goes from small at the bottom (south) to large at the top (north), 
-# while pixels go the other way.
+
+# Notes to self: for pixels, x and y aren't what you think they are.
+#
+#   win = windows.Window(0,0,width=3,height=5)
+#   dat = fp.read(1,window=win)
+#   dat.shape
+#   -> (5,3)
+#
+#  that is, the order of dimensions is height,width, not width,height
+#
+#  1st dimension ~ rows ~ height ~ upper/lower ~ y on the map
+#  2nd dimension ~ columns ~ width ~ left/right ~ x on the map
+
 
 def datafile_pixel_window(datafile:DataFile) -> PixelWindow:
-    return windows.Window(0,0,*datafile.shape)
+    return windows.Window(0, 0, width=datafile.width, height=datafile.height)
 
 def datafile_geo_window(datafile:DataFile) -> GeoWindow:
     return datafile.bounds
@@ -28,10 +38,7 @@ def pixel_to_geo(datafile:DataFile, window:PixelWindow) -> GeoWindow:
 def geo_to_pixel(datafile:DataFile, boundingbox:GeoWindow) -> PixelWindow:
     """Return the pixel Window corresponding to a geographic range in this datafile.
     Note there is no guarantee the Window is in the range covered by datafile"""
-    upperleft = datafile.index(boundingbox.left,boundingbox.top)
-    lowerright = datafile.index(boundingbox.right,boundingbox.bottom)
-
-    return windows.Window(*upperleft,lowerright[0]-upperleft[0],lowerright[1]-upperleft[1])
+    return datafile.window(*boundingbox)
 
 
 def pixel_window_intersect(datafile:DataFile, window:PixelWindow) -> PixelWindow:
@@ -63,8 +70,8 @@ def pad_dataset_to_window(dataset:np.ndarray, actual_window:PixelWindow, desired
         # We willmove it back at the end.
         dataset = np.moveaxis(dataset,0,-1)
 
-        # function to create a block of size width x height x num_bands properly initialized with the pad_values
-        make_block = lambda width, height, pv=pad_value : np.ones([width,height,len(pv)]) * pv
+        # function to create a block of size height x width x num_bands properly initialized with the pad_values
+        make_block = lambda height, width, pv=pad_value : np.ones([height,width,len(pv)]) * pv
 
         # now check each side to see if we need to pad it.
         ((desired_y_low,desired_y_high),(desired_x_low,desired_x_high)) = desired_window.toranges()
@@ -72,27 +79,24 @@ def pad_dataset_to_window(dataset:np.ndarray, actual_window:PixelWindow, desired
         
         if desired_x_low < actual_x_low:  # pad on the left
             delta = actual_x_low - desired_x_low
-            block = make_block( delta, dataset.shape[1] )
-            dataset = np.concatenate((block,dataset), axis=0)
+            block = make_block( dataset.shape[0], delta )
+            dataset = np.concatenate((block,dataset), axis=1)
 
         if desired_x_high > actual_x_high:  # pad on the right
             delta = desired_x_high - actual_x_high
-            block = make_block( delta, dataset.shape[1] )
-            dataset = np.concatenate((dataset, block), axis=0)
+            block = make_block( dataset.shape[0], delta )
+            dataset = np.concatenate((dataset, block), axis=1)
 
         if desired_y_low < actual_y_low:  # pad above
             delta = actual_y_low - desired_y_low
-            block = make_block( dataset.shape[0], delta )
-            dataset = np.concatenate((block, dataset), axis=1)
+            block = make_block( delta, dataset.shape[1] )
+            dataset = np.concatenate((block, dataset), axis=0)
 
         if desired_y_high > actual_y_high:  # pad below
             delta = desired_y_high - actual_y_high
-            block = make_block( dataset.shape[0], delta )
-            dataset = np.concatenate((dataset, block), axis=1)
+            block = make_block( delta, dataset.shape[1] )
+            dataset = np.concatenate((dataset, block), axis=0)
         
         # restore the band to first axis
         return np.moveaxis(dataset,-1,0)
-
-
-
 
