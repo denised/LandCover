@@ -49,7 +49,7 @@ def corine_labeler(lsdat:rasterio.io.DatasetReader, region:windows.Window):
     # get the equivalent pixel boundaries for the matching corine dataset
     corine = fetch_corine(lsdat.crs)
     geo_span = coords.pixel_to_geo(lsdat,region)
-    corine_region = coords.geo_to_pixel(corine,geo_span)
+    corine_region = coords.geo_to_pixel(corine, geo_span, fixed_size=(region.width,region.height))
 
     # read the two datasets, and do various checks that they properly overlap
     # and have actual data in them.
@@ -70,12 +70,17 @@ def corine_labeler(lsdat:rasterio.io.DatasetReader, region:windows.Window):
         count_plus(lsdat.name,'mapoverlap')
         return None
     c_data = corine.read(window=corine_actual_region)
+    # possibly pad back to correct size
+    if corine_region != corine_actual_region:
+        padvalue = [1] + [0]*8  # 1 for nodata band, zero for all other bands
+        c_data = coords.pad_dataset_to_window(c_data, corine_actual_region, corine_region, padvalue)
+    
+    # check if empty
     c_nodata = c_data[ bi('corine','mask') ]
     if c_nodata.all():
         count_plus(lsdat.name,'cempty')
         return None
-    # possibly pad back
-    c_data = coords.pad_dataset_to_window(c_data, corine_actual_region, corine_region)
+    
 
     # Now start transfering data between the two data sets.
     # add the cloud and shadow bitmaps to the corine data
@@ -102,7 +107,7 @@ def corine_labeler(lsdat:rasterio.io.DatasetReader, region:windows.Window):
     
     # finally convert to 0..1 floats
     # both ls and c data are bytes with full range.
-    return (ls_data.astype(float)/255, c_data.astype(float)/255)
+    return (ls_data.astype(np.dtype('float32'))/255, c_data.astype(np.dtype('float32'))/255)
 
 _corine_open_datasets = {}
 

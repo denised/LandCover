@@ -1,12 +1,11 @@
-from typing import Union, Sequence
+from typing import Union, Sequence, Optional, Tuple
 from rasterio import windows
-from rasterio import coords
 import rasterio
 import numpy as np
 
 DataFile = rasterio.io.DatasetReader
 PixelWindow = windows.Window
-GeoWindow = coords.BoundingBox
+GeoWindow = rasterio.coords.BoundingBox
 
 # Rasterio has a class Window that represents spans of a dataset in pixel space,
 # and a class BoundingBox that can represents a span in Geo Space.
@@ -33,12 +32,17 @@ def datafile_geo_window(datafile:DataFile) -> GeoWindow:
 
 def pixel_to_geo(datafile:DataFile, window:PixelWindow) -> GeoWindow:
     """Return the geo BoundingBox corresponding to the pixel window on the datafile"""
-    return coords.BoundingBox(*windows.bounds(window,datafile.transform))
+    return rasterio.coords.BoundingBox(*windows.bounds(window,datafile.transform))
 
-def geo_to_pixel(datafile:DataFile, boundingbox:GeoWindow) -> PixelWindow:
+def geo_to_pixel(datafile:DataFile, boundingbox:GeoWindow, fixed_size:Optional[Tuple[int,int]]=None) -> PixelWindow:
     """Return the pixel Window corresponding to a geographic range in this datafile.
-    Note there is no guarantee the Window is in the range covered by datafile"""
-    return datafile.window(*boundingbox)
+    Note there is no guarantee the Window is in the range covered by datafile.
+    If fixed_size is provided, that is used as the size (width, height) of the result; this may be needed to avoid rounding issues
+    in the floating point arithmetic."""
+    result = datafile.window(*boundingbox)
+    if fixed_size:
+        result = rasterio.windows.Window(result.col_off, result.row_off, *fixed_size)
+    return result.round_lengths().round_offsets()
 
 
 def pixel_window_intersect(datafile:DataFile, window:PixelWindow) -> PixelWindow:
@@ -100,3 +104,15 @@ def pad_dataset_to_window(dataset:np.ndarray, actual_window:PixelWindow, desired
         # restore the band to first axis
         return np.moveaxis(dataset,-1,0)
 
+
+def smudge(pw1: PixelWindow, pw2: PixelWindow) -> (PixelWindow, PixelWindow):
+    """Due to rounding errors, it is possible that the same geo window results in pixel windows of two different sizes
+    for different data files.  Smudge adjusts a matching pair of pixel windows so that they are definitely the same
+    size.   Currently nothing clever here about geo registration; just making the height/width match."""
+    common_height = min(pw1.height,pw2.height)
+    common_width = min(pw1.width,pw2.width)
+    if pw1.width != common_width or pw1.height != common_height:
+        pw1 = rasterio.windows.Window(pw1.col_off,pw1.row_off,common_width,common_height)
+    if pw2.width != common_width or pw2.height != common_height:
+        pw2 = rasterio.windows.Window(pw2.col_off,pw2.row_off,common_width,common_height)
+    return (pw1,pw2)
