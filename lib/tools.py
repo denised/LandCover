@@ -1,5 +1,6 @@
 import numpy as np
 from matplotlib import pyplot
+from matplotlib import patches
 from pathlib import Path
 
 #
@@ -26,63 +27,67 @@ def getsets(n=0,p=0.1,rand=True):
 # Tools for quickly using pyplot with huge and multi-dimensional data
 #
 
-def smaller(ds,factor=64):
+def _smaller(ds,factor=64):
     """Return an array of a smaller size to read into.  Used to get a 'decimated read' from GDAL.
-    Note: assumes all bands are the same type."""
-    return np.empty(shape=(ds.count, ds.width//factor, ds.height//factor), dtype=ds.dtypes[0])
-
-def show_thumbnail(rfp,band=1,level=64):
-    """Show a thumbnail (overview) from the provided open rasterio file pointer."""   
-    # Note: gdal will use a "decimated read" to compute the requested size on the fly if it doesn't exist
-    # as an explicit thumbnail
-    thumb = rfp.read(band, out_shape=(1, rfp.height//level, rfp.width//level))
-    pyplot.imshow(thumb)
+    Note: assumes all bands are the same dtype."""
+    return np.empty(shape=(ds.count, ds.height//factor, ds.width//factor), dtype=ds.dtypes[0])
 
 # Pattern: if you want to do a *single image* at a larger size, you have to add a subplot to do it.
 # pyplot.figure(figsize=(15,15)).add_subplot(111).imshow(...)
 
-def pltnoaxes(plt):
-    return plt.tick_params(axis='both', left=False, bottom=False, labelleft=False, labelbottom=False)
+def _plotstyle(ncols, nrows, imsize):
+    """Return the style parameters for plotting images in ncols x nrows grid, each of which is imsize."""
+    width = 20  # for some reason 20 seems to be a good setting in jupyter notebooks.  weird because it is supposed to be inches?
+    height = (width/ncols) * (imsize[0]/imsize[1]) * nrows
+    return {
+        "figure.figsize": (width, height),
+        "xtick.bottom" : False,
+        "xtick.labelbottom" : False,
+        "ytick.left": False,
+        "ytick.labelleft": False,
+        "image.aspect" : "auto"
+    }
 
-def plotsize(nrows, ncols, basesize=20):   
-    # "20" seems to be a good width for a jupyter screen, for some reason
-    # ncols then sets the overall (sub)figure size, and the calculation detemines
-    # the height needed to accomodate that.  Assumes approximately square tiles.
-    return (basesize, (basesize//ncols) * nrows)
-
-def showbands(filep, ncols=3, basesize=20, level=64):
+def showbands(filep, ncols=3, level=64, showrect=None):
     """Show all the bands in a geotiff file pointer as subplots.  Automatically resizes them down by
-    specified level (set level=1 if you want full size)"""
+    specified level (set level=1 if you want full size)
+    showrect, if provided, is a rectangle to highlight, in the form of a tuple (x_offset, y_offset, width, height)"""
     n = filep.count
     nrows = (n//ncols) + (1 if n%ncols else 0)
-    fig = pyplot.figure(figsize=plotsize(nrows,ncols,basesize))
-    dat = filep.read(out=smaller(filep,level))
-    for i in range(0, n):
-        plt = fig.add_subplot( nrows, ncols, i+1 )
-        pltnoaxes(plt)
-        plt.imshow( dat[i] )
-    fig.show()
+    with pyplot.style.context(_plotstyle(ncols,nrows,filep.shape)):
+        fig = pyplot.figure()
+        dat = filep.read(out=_smaller(filep,level))
+        for i in range(0, n):
+            plt = fig.add_subplot( nrows, ncols, i+1 )
+            plt.imshow( dat[i] )
+            if showrect:
+                # Rectangle expects coordinates from bottom left, not the top. (oh, and the shape is y,x instead of x,y)
+                r = list(showrect)
+                r[1] = filep.shape[0] - r[1]
+                r = [ i / level for i in r ]
+                plt.add_patch(patches.Rectangle((r[0],r[1]),r[2],r[3],facecolor="none",edgecolor="r"))
+        fig.show()
 
-def showaxes(arry, ncols=3, basesize=20):
+def showarry(arry, ncols=3):
     """Show each of the bands of a 3d array as subplots.  No resizing is done."""
     n = arry.shape[0]
     nrows = (n//ncols) + (1 if n%ncols else 0)
-    fig = pyplot.figure(figsize=plotsize(nrows,ncols,basesize))
-    for i in range(0, n):
-        plt = fig.add_subplot( nrows, ncols, i+1 )
-        pltnoaxes(plt)
-        plt.imshow( arry[i] )
-    fig.show()
+    with pyplot.style.context(_plotstyle(ncols, nrows, arry.shape[1:])):
+        fig = pyplot.figure()
+        for i in range(0, n):
+            plt = fig.add_subplot( nrows, ncols, i+1 )
+            plt.imshow( arry[i] )
+        fig.show()
 
-def showbits(dat, n=8, ncols=3, basesize=20):
+def showbits(dat, n=8, ncols=3):
     """Show the unpacked bits of a numpy array (or geotiff band) as subplots.  n controls how many bits
     to unpack"""
     nrows = (n//ncols) + (1 if n%ncols else 0)
-    fig = pyplot.figure(figsize=plotsize(nrows,ncols,basesize))
-    for i in range(0, n):
-        plt = fig.add_subplot( nrows, ncols, i+1 )
-        pltnoaxes(plt)
-        mask = 1<<i
-        plt.imshow( (dat&mask) >> i, cmap="Greys" )
-    fig.show()
+    with pyplot.style.context(_plotstyle(ncols, nrows, dat.shape)):
+        fig = pyplot.figure()
+        for i in range(0, n):
+            plt = fig.add_subplot( nrows, ncols, i+1 )
+            mask = 1<<i
+            plt.imshow( (dat&mask) >> i, cmap="Greys" )
+        fig.show()
 
