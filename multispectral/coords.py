@@ -104,15 +104,16 @@ def pad_dataset_to_window(dataset:np.ndarray, actual_window:PixelWindow, desired
         # restore the band to first axis
         return np.moveaxis(dataset,-1,0)
 
-
-def smudge(pw1: PixelWindow, pw2: PixelWindow) -> (PixelWindow, PixelWindow):
-    """Due to rounding errors, it is possible that the same geo window results in pixel windows of two different sizes
-    for different data files.  Smudge adjusts a matching pair of pixel windows so that they are definitely the same
-    size.   Currently nothing clever here about geo registration; just making the height/width match."""
-    common_height = min(pw1.height,pw2.height)
-    common_width = min(pw1.width,pw2.width)
-    if pw1.width != common_width or pw1.height != common_height:
-        pw1 = rasterio.windows.Window(pw1.col_off,pw1.row_off,common_width,common_height)
-    if pw2.width != common_width or pw2.height != common_height:
-        pw2 = rasterio.windows.Window(pw2.col_off,pw2.row_off,common_width,common_height)
-    return (pw1,pw2)
+def padded_read(fp: rasterio.io.DatasetReader, region: PixelWindow, band: Optional[int]=None, pad_value:Union[int,Sequence[int]]=0) -> np.ndarray:
+    """Read the specified region from the rasterio dataset.  If any part of the region is out of bounds of the dataset, that part is padded
+    with the padding value.  If band is supplied, only that band is read, otherwise all bands are read."""
+    available_region = pixel_window_intersect(fp,region)
+    dat = fp.read(indexes=band, window=available_region)
+    # pad_dataset_to_window assumes we are dealing with multiple bands, and it would be tricky to change that.
+    # instead, we just add-then-remove an extra level in the case that we are dealing with a single band
+    if band:
+        dat = dat[None]  # add an extra dimension
+    dat = pad_dataset_to_window(dat, available_region, region, pad_value)
+    if band:
+        dat = dat[0]
+    return dat 
