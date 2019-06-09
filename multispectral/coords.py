@@ -45,15 +45,26 @@ def geo_to_pixel(datafile:DataFile, boundingbox:GeoWindow, fixed_size:Optional[T
     return result.round_lengths().round_offsets()
 
 
-def pixel_window_intersect(datafile:DataFile, window:PixelWindow) -> PixelWindow:
+def pixel_window_intersect(window1:PixelWindow, window2:PixelWindow) -> PixelWindow:
     """Return the intersection of the window with the dataset (use to avoid reading out of bounds)"""
     try:
-        isect = datafile_pixel_window(datafile).intersection(window)
+        isect = window1.intersection(window2)
     except rasterio.errors.WindowError:
         return None
     else:
         return isect
 
+def geo_window_intersect(bounds1:GeoWindow, bounds2:GeoWindow) -> GeoWindow:
+    """Return the intersection of two geo bounding boxes."""
+    isect = rasterio.coords.BoundingBox(
+        max(bounds1[0],bounds2[0]),
+        max(bounds1[1],bounds2[1]),
+        min(bounds1[2],bounds2[2]),
+        min(bounds1[3],bounds2[3])
+    )
+    if isect[0] >= isect[2]  or  isect[1] >= isect[3]:
+        return None
+    return isect
 
 def pad_dataset_to_window(dataset:np.ndarray, actual_window:PixelWindow, desired_window:PixelWindow, pad_value:Union[int,Sequence[int]]=0) -> np.ndarray:
     """Given an array corresponding to actual_window, return another array corresponding to desired_window, padding any values that
@@ -61,6 +72,7 @@ def pad_dataset_to_window(dataset:np.ndarray, actual_window:PixelWindow, desired
     The pad value is either a single value, or one value per band"""
 
     if actual_window == desired_window:  # nothing needs to be done
+        #print('no padding ',end='')
         return dataset
     else: # create a new dataset that is appropriately extended
         # make sure pad_value is what we want
@@ -82,32 +94,37 @@ def pad_dataset_to_window(dataset:np.ndarray, actual_window:PixelWindow, desired
         ((actual_y_low,actual_y_high),(actual_x_low,actual_x_high)) = actual_window.toranges()
         
         if desired_x_low < actual_x_low:  # pad on the left
+            #print('pad left ',end='')
             delta = actual_x_low - desired_x_low
             block = make_block( dataset.shape[0], delta )
             dataset = np.concatenate((block,dataset), axis=1)
 
         if desired_x_high > actual_x_high:  # pad on the right
+            #print('pad right ',end='')
             delta = desired_x_high - actual_x_high
             block = make_block( dataset.shape[0], delta )
             dataset = np.concatenate((dataset, block), axis=1)
 
         if desired_y_low < actual_y_low:  # pad above
+            #print('pad above ',end='')
             delta = actual_y_low - desired_y_low
             block = make_block( delta, dataset.shape[1] )
             dataset = np.concatenate((block, dataset), axis=0)
 
         if desired_y_high > actual_y_high:  # pad below
+            #print('pad below ',end='')
             delta = desired_y_high - actual_y_high
             block = make_block( delta, dataset.shape[1] )
             dataset = np.concatenate((dataset, block), axis=0)
         
         # restore the band to first axis
         return np.moveaxis(dataset,-1,0)
+    
 
 def padded_read(fp: rasterio.io.DatasetReader, region: PixelWindow, band: Optional[int]=None, pad_value:Union[int,Sequence[int]]=0) -> np.ndarray:
     """Read the specified region from the rasterio dataset.  If any part of the region is out of bounds of the dataset, that part is padded
     with the padding value.  If band is supplied, only that band is read, otherwise all bands are read."""
-    available_region = pixel_window_intersect(fp,region)
+    available_region = pixel_window_intersect(datafile_pixel_window(fp),region)
     dat = fp.read(indexes=band, window=available_region)
     # pad_dataset_to_window assumes we are dealing with multiple bands, and it would be tricky to change that.
     # instead, we just add-then-remove an extra level in the case that we are dealing with a single band

@@ -74,7 +74,7 @@ def from_file(file_name:str) -> WindowList:
             (name,col_off,row_off,width,height) = line.split(',')
             if name not in _open_files.keys():
                 _open_files[name] = rasterio.open(name)
-            yield (_open_files[name], Window(col_off,row_off,width,height))
+            yield (_open_files[name], Window(int(col_off),int(row_off),int(width),int(height)))
 
 
 class WindowedDataset(torch.utils.data.dataset.Dataset):

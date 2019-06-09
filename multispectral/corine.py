@@ -4,6 +4,7 @@ import numpy as np
 from pathlib import Path
 from . import coords
 from . import bands
+from pathlib import Path
    
 def bi(srcname,band):
     # syntactic sugar to make the code more readable
@@ -18,34 +19,36 @@ def bn(srcname,band):
 def corine_filter(lsdat:rasterio.io.DatasetReader, region:windows.Window):
     """Determine whether the given region of a landsat tile has valid data and corresponds to a valid part of the corine dataset"""
 
+    shortname = Path(lsdat.name).stem
+    #print('checking {} {} '.format(shortname, region),end='')
     # does the landsat tile have any data?
     ls_qa = coords.padded_read(lsdat, region, bn('landsat','qa'))
     if not np.any(ls_qa):
-        _count(lsdat.name,'lsempty')
+        _count(shortname,'lsempty')
         return False
     
-    corine = fetch_corine(lsdat.crs)
     geo_span = coords.pixel_to_geo(lsdat,region)
-    corine_region = coords.geo_to_pixel(corine, geo_span, fixed_size=(region.width,region.height))   
-
+    corine = fetch_corine(lsdat.crs)
+     
     # does the landsat tile intersect the corine map at all?
-    if coords.pixel_window_intersect(corine,corine_region) is None:
-        _count(lsdat.name,'mapoverlap')
+    if coords.geo_window_intersect(geo_span,corine.bounds) is None:
+        _count(shortname,'nomapoverlap')
         return False
     
     # is the corresponding corine data empty?
-    c_mask = coords.padded_read(corine,corine_region,bn('corine','mask'),1)
-    if np.all(c_mask):
-        _count(lsdat.name,'cempty')
+    corine_region = coords.geo_to_pixel(corine, geo_span, fixed_size=(region.width,region.height))  
+    c_mask = coords.padded_read(corine,corine_region,bn('corine','mask'))
+    if not np.any(c_mask):
+        _count(shortname,'cempty')
         return False
     
     # finally, is the overlapping data of enough size to interest us?
-    both_data = np.logical_and(c_mask, np.logical_not(ls_qa))
+    both_data = np.logical_and(ls_qa, c_mask)
     if np.count_nonzero(both_data) < both_data.size*0.2:
-        _count(lsdat.name,'dataoverlap')
+        _count(shortname,'nodataoverlap')
         return False
     
-    _count(lsdat.name,'good')
+    _count(shortname,'good')
     return True
 
 def corine_labeler(lsdat:rasterio.io.DatasetReader, region:windows.Window):
@@ -71,7 +74,7 @@ def corine_labeler(lsdat:rasterio.io.DatasetReader, region:windows.Window):
     ls_data = np.delete(ls_data, bi('landsat','qa'), axis=0)  # we don't need the qa band in the ls_data
 
     # get the corine dataset.
-    c_data = coords.padded_read(corine, corine_region, [1]+[0]*8)  # pad value: 1 for mask, 0 for everything else
+    c_data = coords.padded_read(corine, corine_region) 
     c_nodata = (c_data[bi('corine','mask')] == 0)
 
     # Unpack the cloud and shadow data from the landsat data and transfer it as channels to the target data
@@ -83,7 +86,6 @@ def corine_labeler(lsdat:rasterio.io.DatasetReader, region:windows.Window):
     either_nodata = np.logical_or(ls_nodata, c_nodata)
     if np.any(ls_nodata):  # propagate to corine
         c_data[:, either_nodata] = 0
-        c_data[ bi('corine','mask') ] = 255 * np.logical_not(either_nodata)  # put mask back
     if np.any(c_nodata):   # propagate to tile
         ls_data[:, either_nodata] = 0
     
@@ -128,7 +130,7 @@ def fetch_corine(crs) -> rasterio.io.DatasetReader:
 
 
 # Some bookkeeping to track what we're seeing in the data.
-_per_tile_counts = {'lsempty':0,'mapoverlap':0,'cempty':0,'dataoverlap':0,'good':0}
+_per_tile_counts = {'lsempty':0,'nomapoverlap':0,'cempty':0,'nodataoverlap':0,'good':0}
 _tile_counts = {}
 def reset_counts():
     global _tile_counts
@@ -137,3 +139,4 @@ def _count(tile,ctype):
     if tile not in _tile_counts.keys():
         _tile_counts[tile] = _per_tile_counts.copy()
     _tile_counts[tile][ctype] += 1
+    #print(ctype)

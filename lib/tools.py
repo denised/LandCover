@@ -2,51 +2,60 @@ import numpy as np
 from matplotlib import pyplot
 from matplotlib import patches
 from pathlib import Path
-
-#
-# Generate lists of train/validate targets from the data we have available
-#
-
-source = Path('/home/usgs/landsat5')
-
-def getsets(n=0,p=0.1,rand=True):
-    """Return a tuple of training and validation file names.  The training set will be of size (1-p)*n, and the validation set will be p*n.
-    If n is not specified, all the available data will be used.  If rand is true, the files are selected and ordered randomly, otherwise
-    they will be repeatable (providing the data in the directory hasn't changed)"""
-    allfiles = list(source.glob('*.tif'))
-    if rand:
-        np.random.shuffle(allfiles)
-    if n==0:
-        n = len(allfiles)
-    
-    nv = max(1, int(n*p))
-    return (allfiles[nv:n], allfiles[0:nv])
-
+import numbers
 
 #
 # Tools for quickly using pyplot with huge and multi-dimensional data
 #
+# Convention used throughout: we never set the figure width.  Instead, we set the height to be compatible with the width
+# You can use the function tools.set_figure_width(n) to set the figure width however you like.
+# Setting it to 20 seems to work well in Jupyter (which is odd, since it is supposed to be inches?)
+# You can also use the matplotlib context manager like this, if you want to override it only temporarily:
+#  with pyplot.style.context(figsize=(x,y)):
+#     do my thing
 
-def _smaller(ds,factor=64):
-    """Return an array of a smaller size to read into.  Used to get a 'decimated read' from GDAL.
-    Note: assumes all bands are the same dtype."""
-    return np.empty(shape=(ds.count, ds.height//factor, ds.width//factor), dtype=ds.dtypes[0])
 
-# Pattern: if you want to do a *single image* at a larger size, you have to add a subplot to do it.
-# pyplot.figure(figsize=(15,15)).add_subplot(111).imshow(...)
+def set_figure_width(n):
+    pyplot.rcParams["figure.figsize"] = (n,n)
 
 def _plotstyle(ncols, nrows, imsize):
     """Return the style parameters for plotting images in ncols x nrows grid, each of which is imsize."""
-    width = 20  # for some reason 20 seems to be a good setting in jupyter notebooks.  weird because it is supposed to be inches?
+    (width, _) = pyplot.rcParams["figure.figsize"]
     height = (width/ncols) * (imsize[0]/imsize[1]) * nrows
     return {
         "figure.figsize": (width, height),
         "xtick.bottom" : False,
         "xtick.labelbottom" : False,
         "ytick.left": False,
-        "ytick.labelleft": False,
-        "image.aspect" : "auto"
+        "ytick.labelleft": False
     }
+
+def _showrects(plt, rects, level):
+    """Shows the rectangle(s) on the plot, which has been reduced by level."""
+    # the rects argument may be either None, a single tuple, or a list of tuples;
+    # normalize it to a list of tuples
+    if rects is None or len(rects) == 0:
+        rects = []
+    elif isinstance(rects[0], numbers.Number):  # single tuple
+        rects = [rects]
+   
+    for r in rects:
+        r = [ i / level for i in r ]   # take level into account
+        plt.add_patch(patches.Rectangle((r[0],r[1]),r[2],r[3],facecolor="none",edgecolor="r"))
+
+def showband(filep, band, level=64, showrect=None):
+    fig = pyplot.figure() 
+    dat = filep.read(band,out=_smaller(filep,level)[0])
+    # For reasons I don't grok, pyplot treats image size differently when we have a multi-plot display
+    # vs just a single one.  So we pretend we are going to have two side by side to get it to do the right thing.
+    # The result is that it is half the size you would expect, but you can always up the size temporarily.
+    # Hacky, but not worth figuring it out right now.
+    with pyplot.style.context(_plotstyle(2,1,filep.shape)):
+        plt = fig.add_subplot(1,2,1)
+        plt.imshow(dat)
+        if showrect:
+            _showrects(plt, showrect, level) 
+        fig.show()
 
 def showbands(filep, ncols=3, level=64, showrect=None):
     """Show all the bands in a geotiff file pointer as subplots.  Automatically resizes them down by
@@ -61,11 +70,7 @@ def showbands(filep, ncols=3, level=64, showrect=None):
             plt = fig.add_subplot( nrows, ncols, i+1 )
             plt.imshow( dat[i] )
             if showrect:
-                # Rectangle expects coordinates from bottom left, not the top. (oh, and the shape is y,x instead of x,y)
-                r = list(showrect)
-                r[1] = filep.shape[0] - r[1]
-                r = [ i / level for i in r ]
-                plt.add_patch(patches.Rectangle((r[0],r[1]),r[2],r[3],facecolor="none",edgecolor="r"))
+                _showrects(plt, showrect, level)
         fig.show()
 
 def showarry(arry, ncols=3):
@@ -91,3 +96,8 @@ def showbits(dat, n=8, ncols=3):
             plt.imshow( (dat&mask) >> i, cmap="Greys" )
         fig.show()
 
+
+def _smaller(ds,factor=64):
+    """Return an array of a smaller size to read into.  Used to get a 'decimated read' from GDAL.
+    Note: assumes all bands are the same dtype."""
+    return np.empty(shape=(ds.count, ds.height//factor, ds.width//factor), dtype=ds.dtypes[0])
