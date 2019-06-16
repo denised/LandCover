@@ -1,7 +1,6 @@
 import numpy as np
 from matplotlib import pyplot
 from matplotlib import patches
-from pathlib import Path
 import numbers
 
 #

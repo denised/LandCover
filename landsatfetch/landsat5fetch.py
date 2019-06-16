@@ -66,36 +66,63 @@ def get_open_orders():
     return response.json()
 
 
-def download_file(url,saveas):
+def download_file(url, name, saveas):
     """Download a file, saving it in the path requested.  Overwrites existing file."""
+    print('downloading ' + name, end=' ')
     s = get_session()
     response = s.get(url,stream=True)
+    ctr = 0
     with open(saveas,'wb') as out:
-        for chunk in response.iter_content(chunk_size=65535):
-            out.write(chunk)
+       for chunk in response.iter_content(chunk_size=65535):
+           out.write(chunk)
+           ctr = ctr+1
+           if ctr%50 == 0:
+               print('.',end='')
+    print('done')
 
+skipped = []
 def process_item(item):
     """Take the information about a single item (data file) and decide what to do about it:
     ignore it (if it is not ready or if we already have it) or download it (if it is new and ready)"""
     if item['status'] == 'complete':
         file = Path(storage_directory) / (item['name'] + '.tar.gz')
         if not file.exists():
-            print('starting download of ' + item['name'])
-            download_file(item['product_dload_url'],file)
-            return
-    print("xxx ignoring " + item['name'] + " xxx")
+            download_file(item['product_dload_url'], item['name'], file)
+            return item['name']
+        else:
+            print(item['name'] + ': already have')
+    else:
+        print(item['name'] + ': not complete')
+    skipped.append(item['name'])  # temporary debug
+    return None
 
 
 def download_available_results():
-    """Download any products that are ready and have not previously been
-    downloaded."""
+    """Download any products that are ready.  Returns a list of the downloaded names."""
     s = get_session()
     orders = get_open_orders()
+    results = []
     # usgs doesn't like it if you download in parallel, so we don't any more
     for orderid in orders:
+        print("order " + orderid)
         response = s.get(usgs_host+'/item-status/'+orderid, json={"status": "complete"})
         response.raise_for_status()
         data = response.json()
         for item in data[orderid]:
-            process_item(item)
+            r = process_item(item)
+            if r:
+                results.append(r)
     print("download complete")
+    return results
+
+def smudge(pw1: PixelWindow, pw2: PixelWindow) -> (PixelWindow, PixelWindow):
+    """Due to rounding errors, it is possible that the same geo window results in pixel windows of two different sizes
+    for different data files.  Smudge adjusts a matching pair of pixel windows so that they are definitely the same
+    size.   Currently nothing clever here about geo registration; just making the height/width match."""
+    common_height = min(pw1.height,pw2.height)
+    common_width = min(pw1.width,pw2.width)
+    if pw1.width != common_width or pw1.height != common_height:
+        pw1 = rasterio.windows.Window(pw1.col_off,pw1.row_off,common_width,common_height)
+    if pw2.width != common_width or pw2.height != common_height:
+        pw2 = rasterio.windows.Window(pw2.col_off,pw2.row_off,common_width,common_height)
+    return (pw1,pw2)

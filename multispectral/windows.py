@@ -3,6 +3,7 @@ import torch
 import torch.utils.data
 import numpy
 import rasterio
+import numpy as np
  
 """A DataSet designed to enumerate windows over large raster data (e.g. satellite images).
 There are two parts to this process:
@@ -59,8 +60,6 @@ def prefilter(images:Iterable[str], check:Filterer, generator:Windower=window_it
             if check(fp,win):
                 yield (fp, win)
 
-# TODO: round-robin filter generator
-
 def to_file(windows:WindowList, file_name:str) -> None:
     with open(file_name,'w') as fp:
         for (rfp,win) in windows:
@@ -76,6 +75,16 @@ def from_file(file_name:str) -> WindowList:
                 _open_files[name] = rasterio.open(name)
             yield (_open_files[name], Window(int(col_off),int(row_off),int(width),int(height)))
 
+
+def randomized_split(lst:WindowList, vsize:int=256) -> Tuple[WindowList,WindowList]:
+    """Split the windowlist into two lists (for training and validation) while keeping the relative order of the 
+    items in each list intact."""
+    lst = list(lst)
+    chosen = np.sort(np.random.choice(len(lst), vsize, replace=False))
+    vlist = [ list(lst[i]) for i in chosen ]
+    tlist = np.delete(lst,chosen,axis=0)
+    return tlist, vlist
+    
 
 class WindowedDataset(torch.utils.data.dataset.Dataset):
     def __init__(self, windows:WindowList, labeler:Labeler, c:int, classes:Tuple[str]):
