@@ -52,7 +52,7 @@ class Simple(torch.nn.Sequential):
         }
     
     @classmethod
-    def learner(cls, tr_data, val_data, channels=(6,25,11), conv_size=None, batch_size=None, loss_func=None, metrics=None, path=None, **kwargs) -> Learner:
+    def learner(cls, tr_data, val_data, channels=(6,25,11), conv_size=None, batch_size=None, loss_func=None, metrics=None, path=None, title="", **kwargs) -> Learner:
         """Create the fastai learner for the given data and simple model"""
         model = Simple(channels, conv_size)
         bs = ifnone(batch_size, defaults.batch_size)
@@ -63,6 +63,7 @@ class Simple(torch.nn.Sequential):
         learner = Learner(databunch, model, path=path, loss_func=loss_func, metrics=metrics, **kwargs)
         learner.params = dict(model.params,
                               batch_size=bs)
+        learner.title = title
         return learner
 
 
@@ -71,7 +72,7 @@ class ImageUResNet():
     # This is really a thin wrapper around fastai's unet_learner function that lets me set a few defaults and record choices.
         
     @classmethod
-    def learner(cls, tr_data, val_data, arch=models.resnet18, batch_size=None, loss_func=None, metrics=None, path=None, **kwargs) -> Learner:
+    def learner(cls, tr_data, val_data, arch=models.resnet18, batch_size=None, loss_func=None, metrics=None, path=None, title="", **kwargs) -> Learner:
         bs = ifnone(batch_size, defaults.batch_size)
         loss_func = ifnone(loss_func, defaults.loss_func)
         metrics = ifnone(metrics, defaults.metrics)
@@ -79,5 +80,6 @@ class ImageUResNet():
         databunch = DataBunch(rgb_dataset(tr_data).as_loader(bs=bs), 
                               rgb_dataset(val_data).as_loader(bs=bs))
         learner = unet_learner(databunch, arch, path=path, loss_func=loss_func, metrics=metrics, **kwargs)
-        learner.params = dict(arch=arch, batch_size=bs, loss_func=loss_func, **kwargs)
+        learner.params = dict(model='ImageNet', arch=arch, batch_size=bs, loss_func=loss_func, **kwargs)
+        learner.title = title
         return learner

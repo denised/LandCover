@@ -1,8 +1,10 @@
 import torch
 import fastai
 from fastai.core import defaults
-from neptunecontrib.monitoring.fastai import NeptuneMonitor
 import neptune
+import logging
+
+_logger = logging.getLogger(__name__)
 
 """Some infrastructure to simplify model construction and training"""
 
@@ -10,35 +12,54 @@ import neptune
 # Neptune integration
 #
 # Automatically set up netpune experiments and log training parameters on each call to
-# learner.fit, using a fastai callback mechanism.
-#
+# learner.fit, using a fastai callback mechanism.  
+# 
+# Note: this is equivalent to neptune_contrib NeptuneMonitor, with the addition of auto
+# initialization of experiments, and the fact that it will continue to work even if neptune
+# isn't set up.
+# 
         
 class SetUpNeptune(fastai.basic_train.Callback):
-    # TODO: simply replace NeptuneMonitor with our own, so we can be (1) be
-    # graceful about whether we are using neptune or not, and (2)
-    # customize the data it sends back better.
-
     def __init__(self, learner, **kwargs):
         self.learner = learner
         self.exp = None
+        self.own_exp = False  # if true, we created the experiment, so we should stop it
 
     def on_train_begin(self,**kwargs):
         try:  # if the caller has already created an experiment, don't override it.
-            neptune.get_experiment()
+            self.exp = neptune.get_experiment()
         except neptune.exceptions.NoExperimentContext:
             # we normally expect to end up here.
-            params = self.learner.params
+            params = getattr(self.learner, 'params', {})
             params.update(
                 opt=self.learner.opt,
                 loss_func=self.learner.loss_func,
                 callbacks=self.learner.callbacks
             )
-            self.exp = neptune.create_experiment(params = params)
+            title = getattr(self.learner, 'title', "")
+            try:
+                self.exp = neptune.create_experiment(name=title, params=params)
+                self.own_exp = True
+            except neptune.exceptions.Uninitialized:
+                _logger.warn("Neptune not initialized; no tracing will be done")
     
     def on_train_end(self,**kwargs):
-        if self.exp:
+        if self.exp and self.own_exp:
             self.exp.stop()
             self.exp = None
+            self.own_exp = False
+
+    def on_epoch_end(self, **kwargs):
+        if self.exp:
+            # fastai puts the validation loss as the first item in last_metrics
+            metric_names = ['validation_loss'] + kwargs['metrics']
+            for metric_name, metric_value in zip(metric_names, kwargs['last_metrics']):
+                metric_name = getattr(metric_name, '__name__', metric_name)
+                self.exp.send_metric(str(metric_name), float(metric_value))
+
+    def on_batch_end(self, **kwargs):
+        if self.exp:
+            self.exp.send_metric('training_loss', float(kwargs['last_loss']))
 
 ################################################
 # Default settings handling.
@@ -54,7 +75,6 @@ def set_defaults(**overrides):
         loss_func = torch.nn.BCEWithLogitsLoss(),
         model_directory = '.',
         extra_callback_fns = [SetUpNeptune],
-        extra_callbacks = [NeptuneMonitor()],
         default_init = True
     )
     if len(overrides):
