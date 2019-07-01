@@ -3,4 +3,5 @@
 __pycache__
 Data
 Untitled*.ipynb
-
+*.pkl
+models

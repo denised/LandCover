@@ -1,6 +1,11 @@
 import torch
 import fastai
-from fastai.core import defaults
+from fastai.basic_data import DataBunch
+from fastai.basic_train import Learner
+from torch.utils.data.dataloader import DataLoader
+from fastai.core import defaults, ifnone
+from fastai.torch_core import rank_distrib, try_save
+from pathlib import Path
 import neptune
 import logging
 
@@ -20,7 +25,7 @@ _logger = logging.getLogger(__name__)
 # 
         
 class SetUpNeptune(fastai.basic_train.Callback):
-    def __init__(self, learner, **kwargs):
+    def __init__(self, learner):
         self.learner = learner
         self.exp = None
         self.own_exp = False  # if true, we created the experiment, so we should stop it
@@ -84,3 +89,59 @@ def set_defaults(**overrides):
 if not hasattr(defaults,'default_init'):
     set_defaults()
 
+################################################
+# A couple changes to Learner --- override import/export and save params for Neptune
+
+class LearnerPlus(Learner):
+    
+    # No implementation of __init__.  We don't need/use it given how we implement create.
+    
+    def export(self, file='export.pkl', destroy=False):
+        "Export the state of the `Learner` to path"
+        if rank_distrib(): return # don't save if slave proc
+        args = ['opt_func', 'loss_func', 'metrics', 'true_wd', 'bn_wd', 'wd', 'train_bn', 'callback_fns', 'params']
+        state = {a:getattr(self,a) for a in args}
+        state['cb_state'] = {cb.__class__:cb.get_state() for cb in self.callbacks}
+        state['model'] = self.model
+        # No data export (for now)
+        state['cls'] = self.__class__
+        try_save(state, self.path, file)
+        if destroy: self.destroy()
+    
+    @classmethod
+    def create_from_file(cls, path):
+        "Load the learner object saved to path"
+        state = torch.load(path, map_location='cpu') if defaults.device == torch.device('cpu') else torch.load(path)
+        model = state.pop('model')
+        cb_state = state.pop('cb_state')
+        clas_func = state.pop('cls')
+        params = state.pop('params', {})
+        data = DummyDataBunch()
+        res = clas_func(data, model, **state)
+        res.callback_fns = state['callback_fns'] #to avoid duplicates
+        res.callbacks = [fastai.basic_train.load_callback(c,s, res) for c,s in cb_state.items()]
+        res.params = params
+        return res
+    
+    @classmethod
+    def create_databunch(cls, tr_data, val_data, bs):
+        raise NotImplementedError
+    
+    # just syntactic sugar.
+    def set_data(self, tr_data, val_data, bs=None):
+        bs = ifnone(bs, defaults.batch_size)
+        self.data = self.create_databunch(tr_data, val_data, bs)
+
+
+
+class DummyDataBunch(DataBunch):
+    def __init__(self):
+        self.device = defaults.device
+        self.path = Path(".")
+        self.train_dl = DataLoader([])
+        self.valid_dl = DataLoader([])
+        self.fix_dl = None
+        self.test_dl = None
+    
+    def __repr__(self):
+        return "DummyDataBunch()"
