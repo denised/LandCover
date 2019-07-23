@@ -8,12 +8,12 @@ from pathlib import Path
    
 def bi(srcname,band):
     # syntactic sugar to make the code more readable
-    # convert logical name of band to index
+    # convert logical name of band to 0-based index
     src = bands.LANDSAT_BANDS if srcname == 'landsat' else bands.CORINE_BANDS
     return bands.band_index(src,band)
 
 def bn(srcname,band):
-    # band numbers are 1-based, not zero based
+    # return band number (one-based, as used in landsat data)
     return bi(srcname,band)+1
 
 def corine_filter(lsdat:rasterio.io.DatasetReader, region:windows.Window):

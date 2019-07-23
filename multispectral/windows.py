@@ -1,9 +1,10 @@
 from typing import *
+import numpy as np
 import torch
 import torch.utils.data
 import numpy
 import rasterio
-import numpy as np
+from . import coords
  
 """A DataSet designed to enumerate windows over large raster data (e.g. satellite images).
 There are two parts to this process:
@@ -76,6 +77,15 @@ def from_file(file_name:str) -> WindowList:
             yield (_open_files[name], Window(int(col_off),int(row_off),int(width),int(height)))
 
 
+def read_windowList(lst: WindowList) -> Iterable[np.ndarray]:
+    """Convert a WindowList into a list of ndarrays (the actual windowed data).
+    To operate on a sub-portion of the WindowList, pass it through list first, e.g.  read_windowList( list(mylist)[20:28] )
+    To collapse the results into a single ndarray:  np.stack( list( read_windowList(...)))"""
+    # The help text above is as valuable as the actual function ... 
+    for (fp,w) in lst:
+        yield coords.padded_read(fp,w)
+
+
 def randomized_split(lst:WindowList, vsize:int=256) -> Tuple[WindowList,WindowList]:
     """Split the windowlist into two lists (for training and validation) while keeping the relative order of the 
     items in each list intact."""
@@ -84,7 +94,6 @@ def randomized_split(lst:WindowList, vsize:int=256) -> Tuple[WindowList,WindowLi
     vlist = [ list(lst[i]) for i in chosen ]
     tlist = np.delete(lst,chosen,axis=0)
     return tlist, vlist
-    
 
 class WindowedDataset(torch.utils.data.dataset.Dataset):
     def __init__(self, windows:WindowList, labeler:Labeler, c:int, classes:Tuple[str]):

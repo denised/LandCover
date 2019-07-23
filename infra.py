@@ -1,4 +1,5 @@
 import torch
+from torch.tensor import Tensor
 import fastai
 from fastai.basic_data import DataBunch
 from fastai.basic_train import Learner
@@ -72,11 +73,16 @@ class SetUpNeptune(fastai.basic_train.Callback):
 # This builds on the defaults feature of fastai (which isn't documented AFAIK)
 #
 
+def mse_sigmoid(y_pred:Tensor, y_true:Tensor):
+    "Compute MSE after sigmoid"
+    y_pred = y_pred.sigmoid()
+    return fastai.metrics.mean_squared_error(y_pred, y_true)
+
 def set_defaults(**overrides):
     """Set and add standard default settings, with any overrides specified by user"""
     defaults.__dict__.update(
         batch_size = 8,
-        metrics = [fastai.metrics.mean_squared_error],
+        metrics = [mse_sigmoid],
         loss_func = torch.nn.BCEWithLogitsLoss(),
         model_directory = '.',
         extra_callback_fns = [SetUpNeptune],
