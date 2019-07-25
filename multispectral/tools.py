@@ -5,6 +5,8 @@ from matplotlib import pyplot
 from matplotlib import patches
 from matplotlib.cm import get_cmap
 from matplotlib.colors import ListedColormap
+from rasterio.io import DatasetReader
+from contextlib import contextmanager
 import cycler
 import numbers
 
@@ -38,6 +40,22 @@ def _plotstyle(ncols, nrows, imsize):
         "ytick.labelleft": False
     }
 
+
+@contextmanager
+def with_axes(ax=None, show=True):
+    """Allow the same code to operate on a single plot (new fig) or on a designated axis of an existing figure.
+    If show is True _and_ the figure is new, it will be shown at the end"""
+    ours = False
+    if ax is None:
+        fig, ax = pyplot.subplots()  # if you want something more custom than this, you'll have to do it yourself.
+        ours = True
+    else:
+        fig = ax.get_figure()
+    yield (fig, ax)
+    if ours and show:
+        fig.show()
+
+
 # Showing rectangles: this is used to show windows on giant landsat images, and maybe other things.
 
 def _showrects(plt, rects, level):
@@ -53,7 +71,7 @@ def _showrects(plt, rects, level):
         r = [ i / level for i in r ]   # take level into account
         plt.add_patch(patches.Rectangle((r[0],r[1]),r[2],r[3],facecolor="none",edgecolor="r"))
 
-def showband(filep, band, level=64, showrect=None):
+def show_band(filep, band, level=64, showrect=None):
     fig = pyplot.figure() 
     dat = filep.read(band,out=_smaller(filep,level)[0])
     # For reasons I don't grok, pyplot treats image size differently when we have a multi-plot display
@@ -67,7 +85,7 @@ def showband(filep, band, level=64, showrect=None):
             _showrects(plt, showrect, level) 
         fig.show()
 
-def showbands(filep, ncols=3, level=64, showrect=None):
+def _show_file_bands(filep, ncols=3, level=64, showrect=None):
     """Show all the bands in a geotiff file pointer as subplots.  Automatically resizes them down by
     specified level (set level=1 if you want full size)
     showrect, if provided, is a rectangle to highlight, in the form of a tuple (x_offset, y_offset, width, height)"""
@@ -83,7 +101,7 @@ def showbands(filep, ncols=3, level=64, showrect=None):
                 _showrects(plt, showrect, level)
         fig.show()
 
-def showarry(arry, ncols=3):
+def _show_array_bands(arry, ncols=3):
     """Show each of the bands of a 3d array as subplots.  No resizing is done."""
     n = arry.shape[0]
     nrows = (n//ncols) + (1 if n%ncols else 0)
@@ -94,7 +112,14 @@ def showarry(arry, ncols=3):
             plt.imshow( arry[i] )
         fig.show()
 
-def showbits(dat, n=8, ncols=3):
+def show_bands(fileOrArray, ncols=3, level=64, showrect=None):
+    """Show reduced bands from a file, or full bands from an array, depending on the argument"""
+    if isinstance(fileOrArray, DatasetReader):
+        _show_file_bands(fileOrArray, ncols, level, showrect)
+    else:
+        _show_array_bands(fileOrArray, ncols)
+
+def show_bits(dat, n=8, ncols=3):
     """Show the unpacked bits of a numpy array (or geotiff band) as subplots.  n controls how many bits
     to unpack"""
     nrows = (n//ncols) + (1 if n%ncols else 0)
@@ -111,6 +136,20 @@ def _smaller(ds,factor=64):
     """Return an array of a smaller size to read into.  Used to get a 'decimated read' from GDAL.
     Note: assumes all bands are the same dtype."""
     return np.empty(shape=(ds.count, ds.height//factor, ds.width//factor), dtype=ds.dtypes[0])
+
+
+def bands_to_image(dat, rb=2, gb=1, bb=0):
+    """Given satellite band data, turn the first three bands into a traditional image format with crude brightness correction.
+    By changing the bands used for rb, gb and bb, you can make false-color images in the same way."""
+    def norm(x):
+        minv = x.min()
+        maxv = x.max()
+        return (x - minv) / (maxv - minv)
+    red = norm(dat[rb])
+    green = norm(dat[gb])
+    blue = norm(dat[bb])
+    
+    return np.dstack( (red, green, blue) )
 
 
 # ###################################################################################################################
@@ -145,7 +184,8 @@ cc_cycle = cycler.cycler(color=ccmap.colors)  # matching color cycler for plots
 
 def collapse_bands(imgs: ImageOrImages):
     """For each image in imgs, replace the set of bands with a single band whose pixel values select the highest-valued source band
-    For classifications, this means something like selecting the most probable class for each pixel.  Not useful on satellite image data."""
+    For classifications, this means something like selecting the most likely class for each pixel, but not really, because it is 
+    possible that a single pixel has multiple classes.  Not useful on satellite image data."""
     
     # First we have to rejigger the mask band or it will override all the other bands.  What we really want is it's inverse (1 where nodata),
     # but it turns out it is sufficient to set it to a very small value uniformly (all the other bands will be zero if nodata)
@@ -156,13 +196,15 @@ def collapse_bands(imgs: ImageOrImages):
         imgs[0] = 0.0001
 
     axis = 1 if _is_image_array(imgs) else 0
-    return np.argmax(_as_numpy(imgs), axis=axis)
+    result = np.argmax(_as_numpy(imgs), axis=axis )
+    # trick: it is convenient in parts of the code to keep the data format of regular banded-data and collapsed data consistent
+    # to do this we put the band dimension back (it will of course only have a single value)
+    return np.expand_dims(result, axis)
 
-def plot_categorical_img(img):
+def show_categorical_img(img, ax=None):
     """Plot an array interpreted as a segmented categories: each pixel should be an integer value, and the values are assigned unique colors."""
-    fig, ax = pyplot.subplots()
-    ax.imshow(img, interpolation='nearest', cmap=ccmap, vmin=0, vmax=ccmap_vmax)
-    fig.show()
+    with with_axes(ax) as (_,ax):
+        ax.imshow(img, interpolation='nearest', cmap=ccmap, vmin=0, vmax=ccmap_vmax)
 
 _statpoints = [0, 0.2, 0.5, 0.8, 1.0]  # quantiles returned by image-stats
 def image_stats(imgs: ImageOrImages):
@@ -170,15 +212,85 @@ def image_stats(imgs: ImageOrImages):
     axes = (0, 2, 3) if _is_image_array(imgs) else (1, 2)
     return np.quantile(_as_numpy(imgs), _statpoints, axis=axes).transpose()
 
-def plot_image_stats(imgs: ImageOrImages, band_labels = None):
+def plot_image_stats(imgs: ImageOrImages, band_labels = None, ax=None):
     """Show the statistics for the image/image set.  Set band_labels to a list of band names, e.g. bands.CORINE_BANDS"""
     stats = list(image_stats(imgs))
     if band_labels is None:
         band_labels = range(len(stats))
     with pyplot.style.context({'axes.prop_cycle': cc_cycle}):
-        fig, ax = pyplot.subplots()
-        for blab, bstat in zip(band_labels, stats):
-            ax.plot(_statpoints, bstat, 's-', label=blab)
-        ax.legend()
-        fig.show()
+        with with_axes(ax) as (_,ax):
+            for blab, bstat in zip(band_labels, stats):
+                ax.plot(_statpoints, bstat, 's-', label=blab)
+            ax.legend()
+
+# ###################################################################################################################
+# 
+# Extending the above for predictions.
+# Learner.get_preds(with_loss=True) returns a tuple of (predictions, targets, losses),
+# where each of those is a tensor over a dataset (typically the validation set)
+#
+# Typical usage:
+#
+# preds = mylearner.get_preds(with_loss=True)
+# psub = apply_idxs(preds, 0, 5)
+# csub = collapse_predictions(psub)
+# show_predictions(csub)
+
+def apply_idxs(holder, min_val=None, max_val=None):
+    """Subset a list-of-lists: return the approriate subset of each indexable item (array, Tensor, etc.) in holder"""
+    sl = slice(min_val,max_val)  # NB: explicit inclusion of both min and max prevents losing dimension even when a single 
+                                 # element is accessed, e.g. foo[2]
+    return [ x[sl] for x in holder ]
+
+def collapse_predictions(preds):
+    """Collapse each of the predictions and targets in preds via collapse_bands.  The error metric is replaced with a 
+    boolean matrix of agreement between the prediction and target."""
+    result = [ collapse_bands(preds[0]), collapse_bands(preds[1]) ]
+    result.append( np.not_equal( result[0], result[1] ) )
+    return result
+
+def show_predictions(arg, bands=None):
+    """Show side-by-side predictions, targets and error.
+    arg is the output of Learner.get_preds(with_loss=True), or the collapsed version of it.
+    If bands is set it should be an integer or list of band numbers indicating which bands to show."""
     
+    (preds, targets, errs) = arg
+    ashape = preds.shape  # shape of each of the tensors (they all have the same shape)
+    is_collapsed = (ashape[1] == 1)  # collapsed data has a single band.
+    if bands is None:
+        bands = range(1, ashape[1]+1)  # bands start at 1
+    nbands = len(bands)
+    nrows = ashape[0] * nbands
+    ncols = 3
+    imshape = ashape[-2:]
+    predmax = max( preds.max(), targets.max() )
+    errmin = min( errs.min(), 0 )
+    errmax = max( errs.max(), 1 )
+
+    with pyplot.style.context(_plotstyle(ncols, nrows, imshape)):
+        fig = pyplot.figure()
+        for i in range(ashape[0]):  # per data instance
+            for j,b in enumerate(bands): # per band
+                figno = (i*nbands*ncols) + (j*ncols) + 1
+
+                # add three figures:
+                # prediction figure:
+                ax1 = fig.add_subplot( nrows, ncols, figno)
+                if is_collapsed:
+                    show_categorical_img( preds[i,0], ax1 )
+                else:
+                    ax1.imshow( preds[i,b-1], vmin=0, vmax=predmax )
+                ax1.set_title("Image #{}, band {}".format(i, j), loc='left')
+                
+                # target figure:
+                ax2 = fig.add_subplot( nrows, ncols, figno+1 )
+                if is_collapsed:
+                    show_categorical_img( targets[i,0], ax2 )
+                else:
+                    ax2.imshow( targets[i,b-1], vmin=0, vmax=predmax )
+
+                # error figure
+                ax3 = fig.add_subplot( nrows, ncols, figno+2 )
+                ax3.imshow( errs[i,b-1], vmin=errmin, vmax=errmax )
+        fig.show()
+
