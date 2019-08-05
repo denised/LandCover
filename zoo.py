@@ -13,27 +13,6 @@ from infra import LearnerPlus
 
 """Models for working with Landsat / Corine data"""
 
-################################################
-# Convenience functions to create a torch dataset from a windows list
-#
-
-def dataset(windowlist: windows.WindowList) -> torch.utils.data.dataset.Dataset:
-    """Convert a windowlist into a windowed dataset for Corine"""
-    return windows.WindowedDataset(windowlist, corine.corine_labeler, *corine.corine_attributes())
-
-def rgb_dataset(windowlist: windows.WindowList) -> torch.utils.data.dataset.Dataset:
-    """Convert a windowlist into a windowed dataset with RGB channels only (discarding others)"""
-    def rgb_label(lsdat, region):
-        x,y = corine.corine_labeler(lsdat,region)
-        # landsat band ordering is bgr, not rgb, so we have to reorder them as well
-        xrgb = np.stack([x[2],x[1],x[0]])
-        return xrgb,y
-    return windows.WindowedDataset(windowlist, rgb_label, *corine.corine_attributes())
-
-
-################################################
-# Models
-#
 
 class Simple(LearnerPlus):
     """A simple sequence of (convolution, ReLU) pairs.  No up or down scaling."""
@@ -51,19 +30,23 @@ class Simple(LearnerPlus):
         return model
     
     @classmethod
-    def create_databunch(cls, tr_data, val_data, bs=None):
-        bs = ifnone(bs, defaults.batch_size)
-        return DataBunch(dataset(tr_data).as_loader(bs=bs), dataset(val_data).as_loader(bs=bs))
-    
+    def create_dataset(cls, input_data):
+        """Create a dataset from a WindowList"""
+        return windows.WindowedDataset(input_data, corine.corine_labeler, *corine.corine_attributes())
        
     @classmethod
-    def create(cls, tr_data, val_data, channels=(6,25,11), conv_size=None, loss_func=None, metrics=None, path=None, title="", **kwargs):
+    def create(cls, tr_data, val_data, channels=(6,25,11), conv_size=None, loss_func=None, metrics=None, path=None, title="", bs=None, **kwargs):
         """Create a learner with defaults."""
         loss_func = ifnone(loss_func, defaults.loss_func)
         metrics = ifnone(metrics, defaults.metrics)
         path = ifnone(path, defaults.model_directory)
         model = cls.create_model(**kwargs)
-        databunch = cls.create_databunch(tr_data, val_data, **kwargs)
+
+        bs = ifnone(bs, defaults.batch_size)
+        tr_ds = cls.create_dataset(tr_data)
+        val_ds = cls.create_dataset(val_data)
+        databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **kwargs)
+
         learner = Learner(databunch, model, path=path, loss_func=loss_func, metrics=metrics, **kwargs)
         learner.params = dict(model=cls, channels=channels, conv_size=conv_size, loss_func=loss_func, **kwargs)
         learner.title = title
@@ -77,19 +60,27 @@ class ImageUResNet(LearnerPlus):
     # This is really a thin wrapper around fastai's unet_learner function that lets me set a few defaults and record choices.
 
     @classmethod
-    def create_databunch(cls, tr_data, val_data, bs=None):
-        bs = ifnone(bs, defaults.batch_size)
-        return DataBunch(rgb_dataset(tr_data).as_loader(bs=bs), rgb_dataset(val_data).as_loader(bs=bs))
+    def create_dataset(cls, input_data):
+        """Convert a windowlist into a windowed dataset with RGB channels only (discarding others)"""
+        def rgb_label(lsdat, region):
+            x,y = corine.corine_labeler(lsdat,region)
+            # landsat band ordering is bgr, not rgb, so we have to reorder them as well
+            xrgb = np.stack([x[2],x[1],x[0]])
+            return xrgb,y
+        return windows.WindowedDataset(input_data, rgb_label, *corine.corine_attributes())
     
     @classmethod
-    def create(cls, tr_data, val_data, arch=models.resnet18, loss_func=None, metrics=None, path=None, title="", **kwargs):
+    def create(cls, tr_data, val_data, arch=models.resnet18, loss_func=None, metrics=None, path=None, title="", bs=None, **kwargs):
         loss_func = ifnone(loss_func, defaults.loss_func)
         metrics = ifnone(metrics, defaults.metrics)
         path = ifnone(path, defaults.model_directory)
-        databunch = cls.create_databunch(tr_data, val_data, **kwargs)
+
+        bs = ifnone(bs, defaults.batch_size)
+        tr_ds = cls.create_dataset(tr_data)
+        val_ds = cls.create_dataset(val_data)
+        databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **kwargs)
 
         learner = unet_learner(databunch, arch, path=path, loss_func=loss_func, metrics=metrics, **kwargs)
-
         learner.params = dict(model=cls, arch=arch, loss_func=loss_func, **kwargs)
         learner.title = title
         learner.__class__ = cls

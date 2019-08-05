@@ -1,3 +1,6 @@
+from contextlib import contextmanager
+from pathlib import Path
+import logging
 import torch
 from torch.tensor import Tensor
 import fastai
@@ -6,9 +9,7 @@ from fastai.basic_train import Learner
 from torch.utils.data.dataloader import DataLoader
 from fastai.core import defaults, ifnone
 from fastai.torch_core import rank_distrib, try_save
-from pathlib import Path
 import neptune
-import logging
 
 _logger = logging.getLogger(__name__)
 
@@ -35,6 +36,10 @@ class SetUpNeptune(fastai.basic_train.Callback):
         try:  # if the caller has already created an experiment, don't override it.
             self.exp = neptune.get_experiment()
         except neptune.exceptions.NoExperimentContext:
+            pass
+        
+        # this code could be inside the except body above; moved it outside for debugging
+        if self.exp is None:
             # we normally expect to end up here.
             params = getattr(self.learner, 'params', {})
             params.update(
@@ -52,20 +57,23 @@ class SetUpNeptune(fastai.basic_train.Callback):
     def on_train_end(self,**kwargs):
         if self.exp and self.own_exp:
             self.exp.stop()
-            self.exp = None
-            self.own_exp = False
+        self.exp = None
+        self.own_exp = False
 
     def on_epoch_end(self, **kwargs):
         if self.exp:
             # fastai puts the validation loss as the first item in last_metrics
             metric_names = ['validation_loss'] + kwargs['metrics']
             for metric_name, metric_value in zip(metric_names, kwargs['last_metrics']):
-                metric_name = getattr(metric_name, '__name__', metric_name)
-                self.exp.send_metric(str(metric_name), float(metric_value))
+                if metric_value is not None:
+                    metric_name = getattr(metric_name, '__name__', metric_name)
+                    self.exp.send_metric(str(metric_name), float(metric_value))
+                else:
+                    _logger.warn("{} has None value".format(metric_name))
 
-    def on_batch_end(self, **kwargs):
-        if self.exp:
-            self.exp.send_metric('training_loss', float(kwargs['last_loss']))
+    # def on_batch_end(self, **kwargs):
+    #     if self.exp:
+    #         self.exp.send_metric('training_loss', float(kwargs['last_loss']))
 
 ################################################
 # Default settings handling.
@@ -115,8 +123,8 @@ class LearnerPlus(Learner):
         if destroy: self.destroy()
     
     @classmethod
-    def create_from_file(cls, path):
-        "Load the learner object saved to path"
+    def create_from_file(cls, path, tr_data=None, val_data=None):
+        "Load the learner object saved to path.  Optionally also set up data for it"
         state = torch.load(path, map_location='cpu') if defaults.device == torch.device('cpu') else torch.load(path)
         model = state.pop('model')
         cb_state = state.pop('cb_state')
@@ -127,17 +135,30 @@ class LearnerPlus(Learner):
         res.callback_fns = state['callback_fns'] #to avoid duplicates
         res.callbacks = [fastai.basic_train.load_callback(c,s, res) for c,s in cb_state.items()]
         res.params = params
+        if not ((tr_data is None) or (val_data is None)):
+            res.set_data(tr_data, val_data)
         return res
     
     @classmethod
-    def create_databunch(cls, tr_data, val_data, bs):
+    def create_dataset(cls, input_data):
+        """Specify a default way of generating a dataset for 'raw' data.  In our case, this will be a WindowList, but there is nothing requiring that."""
+        # Gah.  Rearchitect.
         raise NotImplementedError
     
-    # just syntactic sugar.
     def set_data(self, tr_data, val_data, bs=None):
+        """Set data sources for this learner.  There is nothng magic in this method; it is just syntactic sugar to make the common case simpler."""
+        tr_ds = self.create_dataset(tr_data)
+        val_ds = self.create_dataset(val_data)
         bs = ifnone(bs, defaults.batch_size)
-        self.data = self.create_databunch(tr_data, val_data, bs)
-
+        self.data = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs))
+    
+    @contextmanager
+    def temporary_validation_set(self, x_dataset):
+        """Override the validation set for the duration of this context.  This is usually done to perform validation on a specific set of data."""
+        stashed_validation_loader = self.data.valid_dl
+        self.data.valid_dl = x_dataset.as_loader()
+        yield True
+        self.data.valid_dl = stashed_validation_loader
 
 
 class DummyDataBunch(DataBunch):
