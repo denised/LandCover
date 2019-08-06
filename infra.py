@@ -1,10 +1,11 @@
 from contextlib import contextmanager
 from pathlib import Path
 import logging
+import platform
 import torch
 from torch.tensor import Tensor
 import fastai
-from fastai.basic_data import DataBunch
+from fastai.basic_data import DataBunch, DeviceDataLoader
 from fastai.basic_train import Learner
 from torch.utils.data.dataloader import DataLoader
 from fastai.core import defaults, ifnone
@@ -45,7 +46,9 @@ class SetUpNeptune(fastai.basic_train.Callback):
             params.update(
                 opt=self.learner.opt,
                 loss_func=self.learner.loss_func,
-                callbacks=self.learner.callbacks
+                callbacks=self.learner.callbacks,
+                clstype=type(self.learner),
+                machine=platform.node()
             )
             title = getattr(self.learner, 'title', "")
             try:
@@ -156,7 +159,7 @@ class LearnerPlus(Learner):
     def temporary_validation_set(self, x_dataset):
         """Override the validation set for the duration of this context.  This is usually done to perform validation on a specific set of data."""
         stashed_validation_loader = self.data.valid_dl
-        self.data.valid_dl = x_dataset.as_loader()
+        self.data.valid_dl = DeviceDataLoader(x_dataset.as_loader(), self.data.device)
         yield True
         self.data.valid_dl = stashed_validation_loader
 
@@ -172,3 +175,6 @@ class DummyDataBunch(DataBunch):
     
     def __repr__(self):
         return "DummyDataBunch()"
+
+################################################
+# 

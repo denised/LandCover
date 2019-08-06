@@ -48,12 +48,11 @@ class Simple(LearnerPlus):
         databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **kwargs)
 
         learner = Learner(databunch, model, path=path, loss_func=loss_func, metrics=metrics, **kwargs)
-        learner.params = dict(model=cls, channels=channels, conv_size=conv_size, loss_func=loss_func, **kwargs)
+        learner.params = dict(channels=channels, conv_size=conv_size, loss_func=loss_func, **kwargs)
         learner.title = title
         learner.__class__ = cls
         return learner
     
-
 
 class ImageUResNet(LearnerPlus):
     """Use a classic imagenet trained Unet-resnet on only the RGB channels of the input data"""
@@ -81,7 +80,7 @@ class ImageUResNet(LearnerPlus):
         databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **kwargs)
 
         learner = unet_learner(databunch, arch, path=path, loss_func=loss_func, metrics=metrics, **kwargs)
-        learner.params = dict(model=cls, arch=arch, loss_func=loss_func, **kwargs)
+        learner.params = dict(arch=arch, loss_func=loss_func, **kwargs)
         learner.title = title
         learner.__class__ = cls
         return learner
