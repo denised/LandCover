@@ -1,5 +1,8 @@
 import csv
 
+# This script was used to generate the original list of landsat tiles to look at
+# Kept for historical purposes
+
 thefile = "./WRSCornerPoints.csv"
 
 spans = {

@@ -2,6 +2,6 @@
 .vscode
 __pycache__
 Data
-Untitled*.ipynb
+/*.ipynb
 *.pkl
 models
