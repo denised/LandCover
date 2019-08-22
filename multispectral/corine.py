@@ -99,8 +99,8 @@ def corine_attributes():
     cs = bands.CORINE_BANDS
     return (len(cs), cs)
 
-#The directory where we keep the corine dataset, projected into UTM
-_corine_directory = Path("/home/firewise/corine")
+#The directory where we keep the the UTM projected corine dataset
+_corine_directory = Path("/storage/data/corine")
 _corine_open_datasets = {}
 
 def set_corine_directory(p):

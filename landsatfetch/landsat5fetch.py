@@ -3,7 +3,6 @@ import os
 from pathlib import Path
 
 usgs_host = 'https://espa.cr.usgs.gov/api/v0'
-storage_directory = "/home/usgs/landsat5"
 
 def default_auth():
     return (os.environ['USGS_USER'], os.environ['USGS_PASSWORD'])
@@ -19,7 +18,7 @@ def submit_order(list_of_ids):
     """Submit an order for the given list of landsat ids.
     For now, we are hardwiring all other parameters of the request (landsat5,
     sr, etc.)"""
-    if len(list_of_ids) >= 5000:
+    if len(list_of_ids) >= 100:
         raise ValueError("Too many ids in a single request")
     # Build order body.  We aren't using any of the fancy options,
     # so this is quite simple
@@ -54,7 +53,7 @@ def get_order_status(order_id):
 
 # copied directly from the epsg code... and wrong! (added 'ordered' status)
 valid_statuses = ['ordered', 'complete', 'queued', 'oncache', 'onorder', 'purged',
-                      'processing', 'error', 'unavailable', 'submitted']
+                  'processing', 'error', 'unavailable', 'submitted']
 all_but_purged = valid_statuses[:]
 all_but_purged.remove('purged')
 
@@ -81,11 +80,11 @@ def download_file(url, name, saveas):
     print('done')
 
 skipped = []
-def process_item(item):
+def process_item(item, target_directory):
     """Take the information about a single item (data file) and decide what to do about it:
     ignore it (if it is not ready or if we already have it) or download it (if it is new and ready)"""
     if item['status'] == 'complete':
-        file = Path(storage_directory) / (item['name'] + '.tar.gz')
+        file = Path(target_directory) / (item['name'] + '.tar.gz')
         if not file.exists():
             download_file(item['product_dload_url'], item['name'], file)
             return item['name']
@@ -97,8 +96,8 @@ def process_item(item):
     return None
 
 
-def download_available_results():
-    """Download any products that are ready.  Returns a list of the downloaded names."""
+def download_available_results(target_directory):
+    """Download any products that are ready into the directory dir.  Returns a list of the downloaded names."""
     s = get_session()
     orders = get_open_orders()
     results = []
@@ -109,20 +108,21 @@ def download_available_results():
         response.raise_for_status()
         data = response.json()
         for item in data[orderid]:
-            r = process_item(item)
+            r = process_item(item, target_directory)
             if r:
                 results.append(r)
     print("download complete")
     return results
 
-def smudge(pw1: PixelWindow, pw2: PixelWindow) -> (PixelWindow, PixelWindow):
-    """Due to rounding errors, it is possible that the same geo window results in pixel windows of two different sizes
-    for different data files.  Smudge adjusts a matching pair of pixel windows so that they are definitely the same
-    size.   Currently nothing clever here about geo registration; just making the height/width match."""
-    common_height = min(pw1.height,pw2.height)
-    common_width = min(pw1.width,pw2.width)
-    if pw1.width != common_width or pw1.height != common_height:
-        pw1 = rasterio.windows.Window(pw1.col_off,pw1.row_off,common_width,common_height)
-    if pw2.width != common_width or pw2.height != common_height:
-        pw2 = rasterio.windows.Window(pw2.col_off,pw2.row_off,common_width,common_height)
-    return (pw1,pw2)
+# import rasterio
+# def smudge(pw1, pw2):
+#     """Due to rounding errors, it is possible that the same geo window results in pixel windows of two different sizes
+#     for different data files.  Smudge adjusts a matching pair of pixel windows so that they are definitely the same
+#     size.   Currently nothing clever here about geo registration; just making the height/width match."""
+#     common_height = min(pw1.height,pw2.height)
+#     common_width = min(pw1.width,pw2.width)
+#     if pw1.width != common_width or pw1.height != common_height:
+#         pw1 = rasterio.windows.Window(pw1.col_off,pw1.row_off,common_width,common_height)
+#     if pw2.width != common_width or pw2.height != common_height:
+#         pw2 = rasterio.windows.Window(pw2.col_off,pw2.row_off,common_width,common_height)
+#     return (pw1,pw2)

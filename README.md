@@ -25,17 +25,43 @@ Some other interesting / unusual bits:
 
 * The data we have may have non-overlapping extents.  That is we have landsat data that doesn't correspond to any region covered by
 corine, and vice versa.  So when actually generating the x,y pairs, we intersect them and propagate a 'NODATA' value both ways.
-* I'm using a one-hot encoding of land use class, but not quite: each pixel may have multiple land-use classes with positive values.
+* We using a one-hot encoding of land use class, but not quite: each pixel may have multiple land-use classes with positive values.
 (So I guess you could call it a 'multi-hot' encoding.)  These can be thought of as the probability or proportion of that land use 
 within that pixel (aka 30m^2 region).  I started doing this because map reprojections necessarily "blur" at the edges, and it seemed
 less wrong to make the blurry edges have multiple classes than to arbitrarily choose one, but it remains to be seen if this is a good
 approach or not.
-* Just starting on this: divide the work across multiple machines by data.  That is, have repositories of different landsat tiles in different 
-places, and send the model to each (probably multiple times).  For training a single model this won't be faster than having one giant
-repository, but when training multiple models, you should be able to round-robin them, maybe get better data locality, ...
+* Landsat provides 'cloud' and other quality assessment.  We propagate that information to the target as well, so the learner
+will see something like: "there is both ocean and cloud here", and hopefully learn to recognize cloud, while still having the
+advantage of seeing the extent-behavior of ocean.  (This also uses the multi-hot encoding.)
 
-Using Jupyter notebooks, fastai (https://fast.ai), pytorch and GDAL/rasterio
+Technology: fastai (https://fast.ai), pytorch and GDAL/rasterio
 
 TODO: add references to the landsat and corine data<br>
-TODO: add info about how to set up and use this repo, and add a 'get started' notebook<br>
-TODO: create public repository for our version of the corine dataset and corresponding model.
+TODO: add a 'get started' notebook<br>
+TODO: create public store for our version of the corine dataset, and other artifacts.
+
+# Using this Code - Setup
+
+There are several environment variables that must be set for this code to function properly.  The code snippet below
+specifies them in bash format:
+
+````bash
+# The location of the corine data (in a format that can be opened by pathlib.Path):
+export CORINE_DIR=location_of_corine_data  # TODO: tell people how to download/reference this!
+
+# If you want to use the landsat fetch code, you need to create an account with USGS (which you can obtain via the registration
+# button at https://earthexplorer.usgs.gov).  The code will look for your username and password here:
+export USGS_USER=your_user_name
+export USGS_PASSWORD=your_password
+
+# If you want to use neptune.ml for experiment monitoring and reporting, you will need an account with them
+# and a API token, set here
+export NEPTUNE_API_TOKEN=your_long_api_key
+````
+
+This code also builds on the fastai `default` feature.  The default values used and defined in this code can be found
+in the file `infra.py`.  (See examples in the top-level notebooks of overriding these values.)
+
+# Using this Code - Jupyter Notebooks
+
+_TODO_

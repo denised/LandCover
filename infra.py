@@ -95,7 +95,7 @@ def set_defaults(**overrides):
         batch_size = 8,
         metrics = [mse_sigmoid],
         loss_func = torch.nn.BCEWithLogitsLoss(),
-        model_directory = '.',
+        model_directory = 'models',
         extra_callback_fns = [SetUpNeptune],
         default_init = True
     )

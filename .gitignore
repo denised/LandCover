@@ -1,7 +1,6 @@
 .ipynb_checkpoints
 .vscode
 __pycache__
-Data
-/*.ipynb
+Untitled*.ipynb
 *.pkl
 models
