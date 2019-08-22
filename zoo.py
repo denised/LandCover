@@ -1,6 +1,7 @@
 import numpy as np
 import torch
-import torch.nn
+import torch.nn as nn
+from torchvision.models.resnet import BasicBlock, Bottleneck, ResNet
 from fastai.basic_data import DataBunch
 from fastai.basic_train import Learner
 from fastai.layers import conv_layer
@@ -80,6 +81,54 @@ class ImageUResNet(LearnerPlus):
         databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **kwargs)
 
         learner = unet_learner(databunch, arch, path=path, loss_func=loss_func, metrics=metrics, **kwargs)
+        learner.params = dict(arch=arch, loss_func=loss_func, **kwargs)
+        learner.title = title
+        learner.__class__ = cls
+        return learner
+
+
+class MultiUResNet(LearnerPlus):
+    """The same as UNet-ResNet, but accepting 6 input bands instead of 3"""
+    
+    standard_arches = {
+        'resnet18': (BasicBlock, [2, 2, 2, 2]),
+        'resnet34': (BasicBlock, [3, 4, 6, 3]),
+        'resnet50': (Bottleneck, [3, 4, 6, 3]),
+        'resnet101': (Bottleneck, [3, 4, 23, 3]),
+        'resnet152': (Bottleneck, [3, 8, 36, 3])
+    }
+
+    @classmethod
+    def create_resnet(cls, arch='resnet18'):
+        # Literally the only difference with a standard resnet is that the initial layer takes 6 channel
+        # input instead of 3.  So we create the model by creating a standard resnet then swapping out
+        # the first layer for the one we want.
+        (block, layers) = cls.standard_arches[arch]
+        model = ResNet(block, layers)
+        model.conv1 = nn.Conv2d(6, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        return model
+    
+    @classmethod
+    def create_dataset(cls, input_data):
+        """Create a dataset from a WindowList"""
+        return windows.WindowedDataset(input_data, corine.corine_labeler, *corine.corine_attributes())
+
+    @classmethod
+    def create(cls, tr_data, val_data, arch='resnet18', loss_func=None, metrics=None, path=None, title="<untitled>", bs=None, **kwargs):
+        loss_func = ifnone(loss_func, defaults.loss_func)
+        metrics = ifnone(metrics, defaults.metrics)
+        path = ifnone(path, defaults.model_directory)
+
+        bs = ifnone(bs, defaults.batch_size)
+        tr_ds = cls.create_dataset(tr_data)
+        val_ds = cls.create_dataset(val_data)
+        databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **kwargs)
+
+        # now we can't quite use unet_learner here because it has other dependencies that get in the way.
+        # so we have to replicate parts of it.
+
+        genfn = lambda _, arch=arch : cls.create_resnet(arch)
+        learner = unet_learner(databunch, genfn, pretrained=False, path=path, loss_func=loss_func, metrics=metrics, **kwargs)
         learner.params = dict(arch=arch, loss_func=loss_func, **kwargs)
         learner.title = title
         learner.__class__ = cls
