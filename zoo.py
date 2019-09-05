@@ -2,15 +2,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torchvision.models.resnet import BasicBlock, Bottleneck, ResNet
-from fastai.basic_data import DataBunch
-from fastai.basic_train import Learner
-from fastai.layers import conv_layer
-from fastai.core import ifnone, defaults
-from fastai.vision import models, unet_learner
-#from multispectral import coords
+from fastai.basics import *
+from fastai import vision
 from multispectral import windows
 from multispectral import corine
-from infra import LearnerPlus
+from multispectral import bands
+from infra.learnerplus import LearnerPlus, CycleHandler, Validate
+from infra.neptuneplus import SendToNeptune
 
 """Models for working with Landsat / Corine data"""
 
@@ -36,19 +34,20 @@ class Simple(LearnerPlus):
         return windows.WindowedDataset(input_data, corine.corine_labeler, *corine.corine_attributes())
        
     @classmethod
-    def create(cls, tr_data, val_data, channels=(6,25,11), conv_size=None, loss_func=None, metrics=None, path=None, title="", bs=None, **kwargs):
+    def create(cls, tr_data, val_data, channels=(6,25,11), conv_size=None, loss_func=None, metrics=None, path=None, title="<untitled>", bs=None, 
+               cbs=None, **kwargs):
         """Create a learner with defaults."""
         loss_func = ifnone(loss_func, defaults.loss_func)
         metrics = ifnone(metrics, defaults.metrics)
         path = ifnone(path, defaults.model_directory)
-        model = cls.create_model(**kwargs)
+        model = cls.create_model(channels, conv_size)
 
         bs = ifnone(bs, defaults.batch_size)
         tr_ds = cls.create_dataset(tr_data)
         val_ds = cls.create_dataset(val_data)
         databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **kwargs)
 
-        learner = Learner(databunch, model, path=path, loss_func=loss_func, metrics=metrics, **kwargs)
+        learner = Learner(databunch, model, path=path, loss_func=loss_func, metrics=metrics, callback_fns=cbs, **kwargs)
         learner.params = dict(channels=channels, conv_size=conv_size, loss_func=loss_func, **kwargs)
         learner.title = title
         learner.__class__ = cls
@@ -70,7 +69,7 @@ class ImageUResNet(LearnerPlus):
         return windows.WindowedDataset(input_data, rgb_label, *corine.corine_attributes())
     
     @classmethod
-    def create(cls, tr_data, val_data, arch=models.resnet18, loss_func=None, metrics=None, path=None, title="", bs=None, **kwargs):
+    def create(cls, tr_data, val_data, arch=vision.models.resnet18, loss_func=None, metrics=None, path=None, title="<untitled>", bs=None, **kwargs):
         loss_func = ifnone(loss_func, defaults.loss_func)
         metrics = ifnone(metrics, defaults.metrics)
         path = ifnone(path, defaults.model_directory)
@@ -80,7 +79,7 @@ class ImageUResNet(LearnerPlus):
         val_ds = cls.create_dataset(val_data)
         databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **kwargs)
 
-        learner = unet_learner(databunch, arch, path=path, loss_func=loss_func, metrics=metrics, **kwargs)
+        learner = vision.unet_learner(databunch, arch, path=path, loss_func=loss_func, metrics=metrics, **kwargs)
         learner.params = dict(arch=arch, loss_func=loss_func, **kwargs)
         learner.title = title
         learner.__class__ = cls
@@ -124,12 +123,54 @@ class MultiUResNet(LearnerPlus):
         val_ds = cls.create_dataset(val_data)
         databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **kwargs)
 
-        # now we can't quite use unet_learner here because it has other dependencies that get in the way.
-        # so we have to replicate parts of it.
-
         genfn = lambda _, arch=arch : cls.create_resnet(arch)
-        learner = unet_learner(databunch, genfn, pretrained=False, path=path, loss_func=loss_func, metrics=metrics, **kwargs)
+        learner = vision.unet_learner(databunch, genfn, pretrained=False, path=path, loss_func=loss_func, metrics=metrics, **kwargs)
         learner.params = dict(arch=arch, loss_func=loss_func, **kwargs)
         learner.title = title
         learner.__class__ = cls
         return learner
+    
+
+class CorineDataStats(Callback):
+    """Put some very corine-specific stats about the data into metrics."""
+    _order = -20 #Needs to run before other callbacks that will look at metric_names
+    stats = [0] * 5
+
+    def on_train_begin(self, metrics_names, **kwargs):
+        # return a set of classes we are going to look at.  #x will count how many x occur in the target data,
+        # while learnedany will aggregate over all of them in the learned output
+        self.names = ["#barren","#urban","#wetlands","#shrub","learnedany"]
+        # indexes of these classes in the data
+        self.indexes = [ bands.band_index(bands.CORINE_BANDS,b) for b in ['barren','urban','wetlands','shrub'] ]
+        # Modifying metrics_names doesn't work in a regular callback but it does in CycleHandler
+        return { 'metrics_names' : metrics_names +  self.names }
+    
+    def on_epoch_begin(self, **kwargs):
+        self.stats = [0] * 5
+    
+    def on_batch_end(self, last_target, last_output, train, **kwargs):
+
+        #import pdb; pdb.set_trace()
+        if train:
+            last_target = last_target.detach()    # dunno if we need to detach or not, but it doesn't hurt
+            last_output = last_output.detach().sigmoid()
+
+            for i in range(len(self.indexes)):
+                # Note we are summing here, which will get us a density measure rather than an actual count
+                # (since the values are floats, not necessarily 0..1)
+                self.stats[i] += last_target[:,self.indexes[i]].sum().item()
+                
+                # But for learning, we're only going to sum high-value items, so it is more count-like
+                lo = last_output[:,self.indexes[i]].numpy()
+                self.stats[4] += lo[lo>0.7].sum()
+    
+    def on_epoch_end(self, num_batch, last_metrics, last_target, **kwargs):
+        #import pdb; pdb.set_trace()
+        size = num_batch * last_target.numel() // last_target.size()[1]  # number of pixels per band over the whole epoch
+        stats = [ math.floor( 100 * x / size ) for x in self.stats ]
+        return { 'last_metrics': last_metrics + stats }
+
+def standard_monitor(n=20):
+    """Construct a cycle monitor with standard stuff in it"""
+    cbs = [ Validate, CorineDataStats(), SendToNeptune ]
+    return CycleHandler.create(n=n, callbacks = cbs)

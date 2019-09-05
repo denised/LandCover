@@ -42,13 +42,10 @@ TODO: create public store for our version of the corine dataset, and other artif
 
 # Using this Code - Setup
 
-There are several environment variables that must be set for this code to function properly.  The code snippet below
+There are several environment variables that may need to be set for this code to function properly.  The code snippet below
 specifies them in bash format:
 
 ````bash
-# The location of the corine data (in a format that can be opened by pathlib.Path):
-export CORINE_DIR=location_of_corine_data  # TODO: tell people how to download/reference this!
-
 # If you want to use the landsat fetch code, you need to create an account with USGS (which you can obtain via the registration
 # button at https://earthexplorer.usgs.gov).  The code will look for your username and password here:
 export USGS_USER=your_user_name
@@ -59,7 +56,9 @@ export USGS_PASSWORD=your_password
 export NEPTUNE_API_TOKEN=your_long_api_key
 ````
 
-This code also builds on the fastai `default` feature.  The default values used and defined in this code can be found
+Use the function `multispectral.corine.set_corine_directory(`_d_`)` to tell the corine code where to find the corine dataset.
+
+Finally, this code also builds on the fastai `default` feature.  The default values used and defined in this code can be found
 in the file `infra.py`.  (See examples in the top-level notebooks of overriding these values.)
 
 # Using this Code - Jupyter Notebooks

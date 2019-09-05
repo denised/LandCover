@@ -219,6 +219,18 @@ def plot_image_stats(imgs: ImageOrImages, band_labels = None, ax=None):
                 ax.plot(_statpoints, bstat, 's-', label=blab)
             ax.legend()
 
+def find_interesting(imgs: ImageOrImages, band=None, howmany=10):
+    """Return some of the first-found 'interesting' data (data that is *between*
+    0 and 1) within imgs.  If bands is specified, limit to that band.
+    Serves kind of as a hash"""
+    dat = _as_numpy(imgs)
+    if band:
+        dat = dat[:,band] if _is_image_array(dat) else dat[band]
+    dat[dat>=1] = 0
+    dat = dat[dat>0]
+    return dat[:howmany] if howmany < len(dat) else dat
+
+
 # ###################################################################################################################
 # 
 # Side-by-side comparison of inputs, predictions and targets

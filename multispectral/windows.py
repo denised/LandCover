@@ -95,6 +95,14 @@ def randomized_split(lst:WindowList, vsize:int=256) -> Tuple[WindowList,WindowLi
     tlist = np.delete(lst,chosen,axis=0)
     return tlist, vlist
 
+def randomer_split(lst:WindowList, tsize=None, vsize:int=256) -> Tuple[WindowList,WindowList]:
+    """Split the windowlist into two lists (for training and validation).  Does not respect ordering of the
+    list.  This will have performance impacts"""
+    lst = np.random.permutation(list(lst))
+    if tsize is None:
+        tsize = len(lst) - vsize
+    return lst[:tsize], lst[tsize:tsize+vsize]
+
 class WindowedDataset(torch.utils.data.dataset.Dataset):
     def __init__(self, windows:WindowList, labeler:Labeler, c:int, classes:Tuple[str]):
         """
