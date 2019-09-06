@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from pathlib import Path
 from functools import partial
+from matplotlib import pyplot
 import torch
 import fastai
 from fastai.basic_train import * #Learner
@@ -300,6 +301,32 @@ class Validate(LearnerCallback):
         return { 'last_metrics' : last_metrics }
 
 
+class LRFindAccumulator(object):
+    """Accumulate multiple lr_find results to compare them on the same graph"""
+    def __init__(self, learner, title="a"):
+        """Create a new accumulator, starting with the first lrfind result currently in this learner"""
+        self.curves = []
+        self.add(learner, title)
+ 
+    def add(self, learner, title=None):
+        """Add another lrfind result to the list"""
+        title = ifnone(title, chr(ord("a") + len(self.curves)))
+        self.curves.append( (title, learner.recorder.lrs, [x.item() for x in learner.recorder.losses]) )
+    
+    def plot(self, bylrs=True):
+        _, ax = pyplot.subplots(1,1)
+        for (label, xs, ys) in self.curves:
+            if bylrs:
+                ax.plot(xs, ys, label=label)
+            else:
+                ax.plot(ys, label=label)
+        ax.set_ylabel("Loss")
+        ax.set_xlabel("Learning Rate" if bylrs else "Batch")
+        if bylrs: 
+            ax.set_xscale('log')
+            ax.xaxis.set_major_formatter(pyplot.FormatStrFormatter('%.0e'))
+        ax.legend()
+
 # cblog = []
 # def log_it(ob, mname, **kwargs):
 #     record = {
@@ -326,3 +353,4 @@ class Validate(LearnerCallback):
 #         csvwriter.writeheader()
 #         for record in cblog:
 #             csvwriter.writerow(record)
+
