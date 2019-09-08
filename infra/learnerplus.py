@@ -136,16 +136,13 @@ class DummyDataBunch(DataBunch):
         return "DummyDataBunch()"
 
     
-class EpochShortener(Callback):
-    """Make the learner system (callback handler, etc.) behave as though the epoch is a particular length, regardless of
-    the size of the input data.  Note that multiple epochs will go over the _same_ data, not progress..."""
-    def __init__(self, length):
-        self.length = length
-    
-    def on_batch_end(self, num_batch, **kwargs):
-        if num_batch > self.length:
-            return { 'stop_epoch': True }
-        return None
+class EpochCleaner(LearnerCallback):
+    _order = -10
+    """Clean up some stuff (currently just the per-batch recorder data) every epoch"""
+    def on_epoch_begin(self, **kwargs):
+        self.learn.recorder.losses = []
+        self.learn.recorder.lrs = []
+        self.learn.recorder.moms = []
 
 
 class CycleHandler(LearnerCallback):
@@ -301,27 +298,42 @@ class Validate(LearnerCallback):
         return { 'last_metrics' : last_metrics }
 
 
-class LRFindAccumulator(object):
-    """Accumulate multiple lr_find results to compare them on the same graph"""
-    def __init__(self, learner, title="a"):
-        """Create a new accumulator, starting with the first lrfind result currently in this learner"""
+class LRAccumulator(object):
+    """Accumulate multiple recorder results to compare them on the same graph.  Can be applied across any Learner fit method
+    (lr_find, fit, etc.), and a single accumulator can be used across multiple learners, models, data... anything where you'd like
+    to compare the loss graphs."""
+    def __init__(self, learner, title="a", fmt=''):
+        """Create a new accumulator, starting with the first recorder result currently in this learner.
+        The format of this curve can be specified with the fmt argument using the matplotlib format shortcut notation (e.g. 'ro-')"""
         self.curves = []
-        self.add(learner, title)
+        self.add(learner, title, fmt)
  
-    def add(self, learner, title=None):
-        """Add another lrfind result to the list"""
+    def add(self, learner, title=None, fmt=''):
+        """Add another recorder result to the list.
+        The format of the curve can be specified with the fmt argument using the matplotlib format shortcut notation (e.g. 'ro-')"""
         title = ifnone(title, chr(ord("a") + len(self.curves)))
-        self.curves.append( (title, learner.recorder.lrs, [x.item() for x in learner.recorder.losses]) )
+        self.curves.append( (title, learner.recorder.lrs, [x.item() for x in learner.recorder.losses]), fmt )
     
-    def plot(self, bylrs=True):
+    def drop(self, index=-1):
+        """Add the wrong curve by mistake?"""
+        del self.curves[index]
+    
+    def plot(self, bylrs=True, xmin=None,xmax=None,ymin=None,ymax=None):
+        """Plot all the accumulated curves.  By default, plots loss against learning rate (which is appropriate for comparing lr_find
+        results).  To compare other loss traces, set `bylrs=False`.  By default the graph will be scaled to include all the data for
+        all the curves; use the xmin/max and ymin/max arguments to focus on the interesting part."""
         _, ax = pyplot.subplots(1,1)
-        for (label, xs, ys) in self.curves:
+        for (label, xs, ys, fmt) in self.curves:
             if bylrs:
-                ax.plot(xs, ys, label=label)
+                ax.plot(xs, ys, fmt, label=label)
             else:
-                ax.plot(ys, label=label)
+                ax.plot(ys, fmt, label=label)
         ax.set_ylabel("Loss")
         ax.set_xlabel("Learning Rate" if bylrs else "Batch")
+        if xmin is not None or xmax is not None:
+            ax.set_xlim(left=xmin, right=xmax)
+        if ymin is not None or ymax is not None:
+            ax.set_ylim(bottom=ymin, top=ymax)
         if bylrs: 
             ax.set_xscale('log')
             ax.xaxis.set_major_formatter(pyplot.FormatStrFormatter('%.0e'))
