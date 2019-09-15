@@ -1,16 +1,21 @@
+from functools import partial
 import torch
-from torch.tensor import Tensor
 from fastai.core import defaults
+from .ranger import Ranger
 
 def set_defaults(**overrides):
-    """Set and add standard default settings, with any overrides specified by user"""
-    defaults.__dict__.update(
-        batch_size = 4,
-        loss_func = torch.nn.BCEWithLogitsLoss(),
-        metrics = [],
-        model_directory = 'models',
-        default_init = True
-    )
+    """Set standard default settings, with any overrides specified by user"""
+    # Specify our 'default defaults' only the first time, so as not to override anything the user has set.
+    # You can reset the defaults by calling set_defaults with no arguments.
+    if not hasattr(defaults,'default_init') or len(overrides) == 0:
+        defaults.__dict__.update(
+            batch_size = 4,
+            loss_func = torch.nn.BCEWithLogitsLoss(),
+            opt_func = partial(Ranger),
+            metrics = [],
+            model_directory = 'models',
+            default_init = True
+        )
     if len(overrides):
         defaults.__dict__.update(**overrides)
 

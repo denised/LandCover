@@ -61,8 +61,8 @@ def prefilter(images:Iterable[str], check:Filterer, generator:Windower=window_it
             if check(fp,win):
                 yield (fp, win)
 
-def to_file(windows:WindowList, file_name:str) -> None:
-    with open(file_name,'w') as fp:
+def to_file(windows:WindowList, file_name:str, append=False) -> None:
+    with open(file_name,'a' if append else 'w') as fp:
         for (rfp,win) in windows:
             print("{},{},{},{},{}".format(rfp.name,win.col_off,win.row_off,win.width,win.height), file=fp)
 

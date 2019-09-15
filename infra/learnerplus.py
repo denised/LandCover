@@ -302,17 +302,17 @@ class LRAccumulator(object):
     """Accumulate multiple recorder results to compare them on the same graph.  Can be applied across any Learner fit method
     (lr_find, fit, etc.), and a single accumulator can be used across multiple learners, models, data... anything where you'd like
     to compare the loss graphs."""
-    def __init__(self, learner, title="a", fmt=''):
-        """Create a new accumulator, starting with the first recorder result currently in this learner.
-        The format of this curve can be specified with the fmt argument using the matplotlib format shortcut notation (e.g. 'ro-')"""
+    def __init__(self, learner=None, title="a", fmt=''):
+        """Create a new accumulator, optionally starting with an initial recorder trace."""
         self.curves = []
-        self.add(learner, title, fmt)
+        if learner:
+            self.add(learner, title, fmt)
  
     def add(self, learner, title=None, fmt=''):
-        """Add another recorder result to the list.
+        """Add another recorder trace to the list.
         The format of the curve can be specified with the fmt argument using the matplotlib format shortcut notation (e.g. 'ro-')"""
         title = ifnone(title, chr(ord("a") + len(self.curves)))
-        self.curves.append( (title, learner.recorder.lrs, [x.item() for x in learner.recorder.losses]), fmt )
+        self.curves.append( (title, learner.recorder.lrs, [x.item() for x in learner.recorder.losses], fmt) )
     
     def drop(self, index=-1):
         """Add the wrong curve by mistake?"""

@@ -34,10 +34,11 @@ class Simple(LearnerPlus):
         return windows.WindowedDataset(input_data, corine.corine_labeler, *corine.corine_attributes())
        
     @classmethod
-    def create(cls, tr_data, val_data, channels=(6,25,11), conv_size=None, loss_func=None, metrics=None, path=None, title="<untitled>", bs=None, 
+    def create(cls, tr_data, val_data, channels=(6,25,11), conv_size=None, loss_func=None, opt_func=None, metrics=None, path=None, title="<untitled>", bs=None, 
                cbs=None, **kwargs):
         """Create a learner with defaults."""
         loss_func = ifnone(loss_func, defaults.loss_func)
+        opt_func = ifnone(opt_func, defaults.opt_func)
         metrics = ifnone(metrics, defaults.metrics)
         path = ifnone(path, defaults.model_directory)
         model = cls.create_model(channels, conv_size)
@@ -47,7 +48,7 @@ class Simple(LearnerPlus):
         val_ds = cls.create_dataset(val_data)
         databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **kwargs)
 
-        learner = Learner(databunch, model, path=path, loss_func=loss_func, metrics=metrics, callback_fns=cbs, **kwargs)
+        learner = Learner(databunch, model, path=path, loss_func=loss_func, opt_func=opt_func, metrics=metrics, callback_fns=cbs, **kwargs)
         learner.params = dict(channels=channels, conv_size=conv_size, loss_func=loss_func, **kwargs)
         learner.title = title
         learner.__class__ = cls
@@ -69,8 +70,9 @@ class ImageUResNet(LearnerPlus):
         return windows.WindowedDataset(input_data, rgb_label, *corine.corine_attributes())
     
     @classmethod
-    def create(cls, tr_data, val_data, arch=vision.models.resnet18, loss_func=None, metrics=None, path=None, title="<untitled>", bs=None, **kwargs):
+    def create(cls, tr_data, val_data, arch=vision.models.resnet18, loss_func=None, opt_func=None, metrics=None, path=None, title="<untitled>", bs=None, **kwargs):
         loss_func = ifnone(loss_func, defaults.loss_func)
+        opt_func = ifnone(opt_func, defaults.opt_func)
         metrics = ifnone(metrics, defaults.metrics)
         path = ifnone(path, defaults.model_directory)
 
@@ -79,7 +81,7 @@ class ImageUResNet(LearnerPlus):
         val_ds = cls.create_dataset(val_data)
         databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **kwargs)
 
-        learner = vision.unet_learner(databunch, arch, path=path, loss_func=loss_func, metrics=metrics, **kwargs)
+        learner = vision.unet_learner(databunch, arch, path=path, loss_func=loss_func, opt_func=opt_func, metrics=metrics, **kwargs)
         learner.params = dict(arch=arch, loss_func=loss_func, **kwargs)
         learner.title = title
         learner.__class__ = cls
@@ -113,8 +115,9 @@ class MultiUResNet(LearnerPlus):
         return windows.WindowedDataset(input_data, corine.corine_labeler, *corine.corine_attributes())
 
     @classmethod
-    def create(cls, tr_data, val_data, arch='resnet18', loss_func=None, metrics=None, path=None, title="<untitled>", bs=None, **kwargs):
+    def create(cls, tr_data, val_data, arch='resnet18', loss_func=None, opt_func=None, metrics=None, path=None, title="<untitled>", bs=None, **kwargs):
         loss_func = ifnone(loss_func, defaults.loss_func)
+        opt_func = ifnone(opt_func, defaults.opt_func)
         metrics = ifnone(metrics, defaults.metrics)
         path = ifnone(path, defaults.model_directory)
 
@@ -124,7 +127,7 @@ class MultiUResNet(LearnerPlus):
         databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **kwargs)
 
         genfn = lambda _, arch=arch : cls.create_resnet(arch)
-        learner = vision.unet_learner(databunch, genfn, pretrained=False, path=path, loss_func=loss_func, metrics=metrics, **kwargs)
+        learner = vision.unet_learner(databunch, genfn, pretrained=False, path=path, loss_func=loss_func, opt_func=opt_func, metrics=metrics, **kwargs)
         learner.params = dict(arch=arch, loss_func=loss_func, **kwargs)
         learner.title = title
         learner.__class__ = cls
@@ -170,7 +173,18 @@ class CorineDataStats(Callback):
         stats = [ math.floor( 100 * x / size ) for x in self.stats ]
         return { 'last_metrics': last_metrics + stats }
 
-def standard_monitor(n=20):
+def standard_monitor(n=100):
     """Construct a cycle monitor with standard stuff in it"""
     cbs = [ Validate, CorineDataStats(), SendToNeptune ]
     return CycleHandler.create(n=n, callbacks = cbs)
+
+
+class SumQuadLoss(nn.Module):
+    def __init__(self, epsilon=0.01):
+        super().__init__()
+        self.epsilon = epsilon
+    
+    def forward(self, input, target):
+        # TODO: apply epsilon to target
+        input = torch.sigmoid(input)
+        return torch.pow( input - target, 4).sum()
