@@ -34,22 +34,19 @@ class Simple(LearnerPlus):
         return windows.WindowedDataset(input_data, corine.corine_labeler, *corine.corine_attributes())
        
     @classmethod
-    def create(cls, tr_data, val_data, channels=(6,25,11), conv_size=None, loss_func=None, opt_func=None, metrics=None, path=None, title="<untitled>", bs=None, 
-               cbs=None, **kwargs):
+    def create(cls, tr_data, val_data, channels=(6,25,11), conv_size=None, title="<untitled>", bs=None, **kwargs):
         """Create a learner with defaults."""
-        loss_func = ifnone(loss_func, defaults.loss_func)
-        opt_func = ifnone(opt_func, defaults.opt_func)
-        metrics = ifnone(metrics, defaults.metrics)
-        path = ifnone(path, defaults.model_directory)
-        model = cls.create_model(channels, conv_size)
-
+        l_args, d_args = cls._init_args(**kwargs)
+   
         bs = ifnone(bs, defaults.batch_size)
         tr_ds = cls.create_dataset(tr_data)
         val_ds = cls.create_dataset(val_data)
-        databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **kwargs)
+        databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **d_args)
 
-        learner = Learner(databunch, model, path=path, loss_func=loss_func, opt_func=opt_func, metrics=metrics, callback_fns=cbs, **kwargs)
-        learner.params = dict(channels=channels, conv_size=conv_size, loss_func=loss_func, **kwargs)
+        model = cls.create_model(channels, conv_size)
+
+        learner = Learner(databunch, model, **l_args)
+        learner.params = dict(channels=channels, conv_size=conv_size, bs=bs)
         learner.title = title
         learner.__class__ = cls
         return learner
@@ -70,19 +67,16 @@ class ImageUResNet(LearnerPlus):
         return windows.WindowedDataset(input_data, rgb_label, *corine.corine_attributes())
     
     @classmethod
-    def create(cls, tr_data, val_data, arch=vision.models.resnet18, loss_func=None, opt_func=None, metrics=None, path=None, title="<untitled>", bs=None, **kwargs):
-        loss_func = ifnone(loss_func, defaults.loss_func)
-        opt_func = ifnone(opt_func, defaults.opt_func)
-        metrics = ifnone(metrics, defaults.metrics)
-        path = ifnone(path, defaults.model_directory)
+    def create(cls, tr_data, val_data, arch=vision.models.resnet18, title="<untitled>", bs=None, **kwargs):
+        l_args, d_args = cls._init_args(**kwargs)
 
         bs = ifnone(bs, defaults.batch_size)
         tr_ds = cls.create_dataset(tr_data)
         val_ds = cls.create_dataset(val_data)
-        databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **kwargs)
+        databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **d_args)
 
-        learner = vision.unet_learner(databunch, arch, path=path, loss_func=loss_func, opt_func=opt_func, metrics=metrics, **kwargs)
-        learner.params = dict(arch=arch, loss_func=loss_func, **kwargs)
+        learner = vision.unet_learner(databunch, arch, **l_args)
+        learner.params = dict(arch=arch, bs=bs)
         learner.title = title
         learner.__class__ = cls
         return learner
@@ -115,20 +109,17 @@ class MultiUResNet(LearnerPlus):
         return windows.WindowedDataset(input_data, corine.corine_labeler, *corine.corine_attributes())
 
     @classmethod
-    def create(cls, tr_data, val_data, arch='resnet18', loss_func=None, opt_func=None, metrics=None, path=None, title="<untitled>", bs=None, **kwargs):
-        loss_func = ifnone(loss_func, defaults.loss_func)
-        opt_func = ifnone(opt_func, defaults.opt_func)
-        metrics = ifnone(metrics, defaults.metrics)
-        path = ifnone(path, defaults.model_directory)
+    def create(cls, tr_data, val_data, arch='resnet18', title="<untitled>", bs=None, **kwargs):
+        l_args, d_args = cls._init_args(**kwargs)
 
         bs = ifnone(bs, defaults.batch_size)
         tr_ds = cls.create_dataset(tr_data)
         val_ds = cls.create_dataset(val_data)
-        databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **kwargs)
+        databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **d_args)
 
         genfn = lambda _, arch=arch : cls.create_resnet(arch)
-        learner = vision.unet_learner(databunch, genfn, pretrained=False, path=path, loss_func=loss_func, opt_func=opt_func, metrics=metrics, **kwargs)
-        learner.params = dict(arch=arch, loss_func=loss_func, **kwargs)
+        learner = vision.unet_learner(databunch, genfn, pretrained=False, **l_args)
+        learner.params = dict(arch=arch, bs=bs)
         learner.title = title
         learner.__class__ = cls
         return learner

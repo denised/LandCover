@@ -26,5 +26,5 @@ wl = list(windows.from_file(windows_list))
 monitor = zoo.standard_monitor(n=100)
 infra.set_defaults(bs=4, loss_func=zoo.SumQuadLoss())
 
-learner = zoo.MultiUResNet.create(tr_list, val_list, title="what are we doing today?")
-learner.fit(100, callbacks=[monitor])
+learner = zoo.MultiUResNet.create(tr_list, val_list, title="what are we doing today?", callback_fns=[monitor])
+learner.fit(20)

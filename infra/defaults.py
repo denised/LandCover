@@ -14,6 +14,7 @@ def set_defaults(**overrides):
             opt_func = partial(Ranger),
             metrics = [],
             model_directory = 'models',
+            callback_fns = [],
             default_init = True
         )
     if len(overrides):

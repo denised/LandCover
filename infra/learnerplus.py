@@ -84,6 +84,32 @@ class LearnerPlus(Learner):
         yield True
         self.model.train(stashed_train_state)
     
+    @classmethod
+    def _init_args(cls, opt_func=None, loss_func=None, metrics=None, true_wd=True, bn_wd=True, wd=None, train_bn=True,
+                   path=None, model_dir=None, callback_fns=None, callbacks=None, layer_groups=None, add_time=True, silent=None, 
+                   **kwargs):
+        """Pull out arguments for the learner class and set their defaults.  Returns a tuple learner-args, other-args"""
+        # Why we do this seemingly pointless thing:  this allows our Learner create methods to accept a mixed kwargs that covers both Learner and DataBunch
+        # Here we (a) separate the mixed kwargs into two lists, and (b) standardize the default values for the learner args (which include additional
+        # defaults beyond what fastai does)
+        learner_args = {
+            'opt_func': ifnone(opt_func, defaults.opt_func),
+            'loss_func': ifnone(loss_func, defaults.loss_func),
+            'metrics': ifnone(metrics, defaults.metrics),
+            'true_wd': true_wd,
+            'bn_wd': bn_wd,
+            'wd': ifnone(wd, defaults.wd),
+            'train_bn': train_bn,
+            'path': ifnone(path, defaults.model_directory),
+            'model_dir': ifnone(model_dir, '.'),  # This is a change from fastai default: we mix leaner exports and models in same dir
+            'callback_fns': ifnone(callback_fns, defaults.callback_fns),
+            'callbacks': callbacks,
+            'layer_groups': layer_groups,
+            'add_time': add_time,
+            'silent': silent
+        }
+        return learner_args, kwargs
+    
     # This is crappy architecture, but it will work for now.
     def _extra_run_params(self, kwargs):
         """Add a few extra keyword parameters that we will accept in fit, lr_find, etc."""
