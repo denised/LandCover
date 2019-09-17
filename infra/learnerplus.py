@@ -171,7 +171,7 @@ class EpochCleaner(LearnerCallback):
         self.learn.recorder.moms = []
 
 
-class CycleHandler(LearnerCallback):
+class CycleHandler(Callback):
     """The cycle handler manages a set of other callbacks on a cycle of length n.
     That is, to the callbacks and metrics that are being managed, it appears that the epoch length is n, all the while the top-level CallbackHandler
     is going through the true epoch.  As much as possible, callbacks can be used interchangeably between CallbackHandler and CycleHandler,
@@ -203,7 +203,7 @@ class CycleHandler(LearnerCallback):
             * a function.  Functions are assumed to compute a metric over a batch, and are automatically wrapped in AverageMetric to return the average of
             that function over all batches in the cycle.
         Collectively this covers the cases supported via various features of Learner and CallbackHandler"""
-        super().__init__(learner)
+        super().__init__()
         self.n = n
         self.count = 0
         self.callbacks = []

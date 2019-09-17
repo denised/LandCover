@@ -143,8 +143,6 @@ class CorineDataStats(Callback):
         self.stats = [0] * 5
     
     def on_batch_end(self, last_target, last_output, train, **kwargs):
-
-        #import pdb; pdb.set_trace()
         if train:
             last_target = last_target.detach()    # dunno if we need to detach or not, but it doesn't hurt
             last_output = last_output.detach().sigmoid()
@@ -159,10 +157,21 @@ class CorineDataStats(Callback):
                 self.stats[4] += lo[lo>0.7].sum()
     
     def on_epoch_end(self, num_batch, last_metrics, last_target, **kwargs):
-        #import pdb; pdb.set_trace()
-        size = num_batch * last_target.numel() // last_target.size()[1]  # number of pixels per band over the whole epoch
-        stats = [ math.floor( 100 * x / size ) for x in self.stats ]
-        return { 'last_metrics': last_metrics + stats }
+        stats = [ 0.0 for x in self.stats ]
+        try: # protext divide by zero or anything else that might happen.
+            size = num_batch * last_target.numel() // last_target.size()[1]
+            stats = [ math.floor( 100 * x / size ) for x in self.stats ]
+        except:
+            pass
+
+        return { 'last_metrics' : last_metrics + stats }
+        
+    # For reasons I don't understand, Callback __repr__ breaks on this class, so overriding here...
+    # Somehow (perhaps because Jupyter/IPython?), the methods get wrapped, and the call to func_args()
+    # fails with the error  AttributeError: 'method-wrapper' object has no attribute '__code__'
+    def __repr__(self):
+        return "zoo.CorineDataStats()"
+
 
 def standard_monitor(n=100):
     """Construct a cycle monitor with standard stuff in it"""
