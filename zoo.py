@@ -145,7 +145,7 @@ class CorineDataStats(Callback):
     def on_batch_end(self, last_target, last_output, train, **kwargs):
         if train:
             last_target = last_target.detach()    # dunno if we need to detach or not, but it doesn't hurt
-            last_output = last_output.detach().sigmoid()
+            last_output = last_output.detach().sigmoid()   # shouldn't have to know to put sigmoid() here!
 
             for i in range(len(self.indexes)):
                 # Note we are summing here, which will get us a density measure rather than an actual count
@@ -153,12 +153,13 @@ class CorineDataStats(Callback):
                 self.stats[i] += last_target[:,self.indexes[i]].sum().item()
                 
                 # But for learning, we're only going to sum high-value items, so it is more count-like
-                lo = last_output[:,self.indexes[i]].numpy()
-                self.stats[4] += lo[lo>0.7].sum()
+                lo = last_output[:,self.indexes[i]]
+                biglo = lo.ge(0.7)   # in numpy, this would be lo[lo>0.7].sum()
+                self.stats[4] += torch.masked_select(lo,biglo).sum()
     
     def on_epoch_end(self, num_batch, last_metrics, last_target, **kwargs):
         stats = [ 0.0 for x in self.stats ]
-        try: # protext divide by zero or anything else that might happen.
+        try: # protect divide by zero or anything else that might happen.
             size = num_batch * last_target.numel() // last_target.size()[1]
             stats = [ math.floor( 100 * x / size ) for x in self.stats ]
         except:
