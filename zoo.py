@@ -176,7 +176,7 @@ class CorineDataStats(Callback):
 
 def standard_monitor(n=100):
     """Construct a cycle monitor with standard stuff in it"""
-    cbs = [ Validate, CorineDataStats(), SendToNeptune ]
+    cbs = [ CorineDataStats(), Validate, SendToNeptune ]
     return CycleHandler.create(n=n, callbacks = cbs)
 
 
@@ -187,5 +187,5 @@ class SumQuadLoss(nn.Module):
     
     def forward(self, input, target):
         # TODO: apply epsilon to target
-        input = torch.sigmoid(input)
-        return torch.pow( input - target, 4).sum()
+        input2 = torch.sigmoid(input)
+        return torch.pow( input2 - target, 4).sum()

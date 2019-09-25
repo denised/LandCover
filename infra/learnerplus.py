@@ -323,6 +323,69 @@ class Validate(LearnerCallback):
                 last_metrics.append( result )
         return { 'last_metrics' : last_metrics }
 
+class LearnTracer(fastai.basic_train.LearnerCallback):
+    """Print out various things as they occur.  Best used with "silent=True" argument to fit.
+    Checks for nans on forward and backward, and also checks for zero-grads on backward"""
+
+    def on_train_begin(self, pbar, **kwargs):
+        self.pbar = pbar
+        self.hooks = []
+        
+        def hook(module, input, output, name):
+            if module.training and torch.isnan(output).sum().item() > 0:
+                print("warning: {} output: nan(s)".format(name))
+                if defaults.trace_pdb:
+                    import pdb; pdb.set_trace()
+
+        for n, m in self.learn.model.named_modules():
+            self.hooks.append( m.register_forward_hook( partial(hook, name=n) ))
+
+    def on_batch_end(self, num_batch, last_loss, **kwargs):
+        if num_batch > 0 and num_batch % defaults.trace_frequency == 0:
+            with self.learn.pause_training():
+                result = validate(self.learn.model, self.learn.data.valid_dl, loss_func=self.learn.loss_func, pbar=self.pbar)
+                print("loss: {:8.4f}  val_loss: {:8.4f}".format( last_loss, result ))
+        else:
+            print(".", end='')
+    
+    def on_backward_end(self, num_batch, **kwargs):
+        # periodically report the gradient sum range and mean
+        if num_batch > 0 and num_batch % defaults.trace_frequency == 0:
+            stats = np.array([ p.grad.abs().sum().item() for p in self.learn.model.parameters() if p.grad is not None])
+            if len(stats) > 0:
+                print("batch {:3d}: grad mags: min {:8.3f}, max {:8.3f}, mean {:8.3f}; ".format( num_batch, stats.min(), stats.max(), stats.mean()), end='' )
+            else:
+                print("No grads found", end='')
+        
+        # always check all the grads for either nan or all-zeros
+        # Getting data back from the GPU is expensive, so we first do a check of all grads together, and only if we find an issue
+        # do we check them individually.
+        
+        zeroifbad = [ (p.grad == p.grad).prod()   *   p.grad.ne(0).sum() for p in self.learn.model.parameters() if p.grad is not None ]
+        #  zero if            some nan            or       all-zero
+
+        if torch.stack( zeroifbad ).min().item() == 0:
+            # check everything individually
+            for name,p in self.learn.model.named_parameters():
+                if p.grad is not None:
+                    if torch.isnan(p.grad).sum().item() > 0:
+                        print("warning: {} grad: nan(s)".format(name))
+                    elif p.grad.ne(0).sum().item() == 0:
+                        print("warning: {} grad: all zero".format(name))
+            if defaults.trace_pdb:
+                import pdb; pdb.set_trace()
+
+    def on_train_end(self, **kwargs):
+        for hook in self.hooks:
+            hook.remove()
+
+class TrainEnd(fastai.basic_train.LearnerCallback):
+    # Note: fastai has a callback just like this, but I like setting the trace_end parameter via defaults instead of __init__.
+    # Makes initializing it cleaner.
+    def on_batch_end(self, num_batch, **kwargs):
+        if defaults.train_end and num_batch >= defaults.train_end:
+            return {'stop_epoch': True, 'stop_training': True, 'skip_validate': True}
+
 
 class LRAccumulator(object):
     """Accumulate multiple recorder results to compare them on the same graph.  Can be applied across any Learner fit method
@@ -364,31 +427,3 @@ class LRAccumulator(object):
             ax.set_xscale('log')
             ax.xaxis.set_major_formatter(pyplot.FormatStrFormatter('%.0e'))
         ax.legend()
-
-# cblog = []
-# def log_it(ob, mname, **kwargs):
-#     record = {
-#         'epoch': kwargs['epoch'],
-#         'iter': kwargs['iteration'],
-#         'num_batch': kwargs['num_batch'],
-#         'train': kwargs['train'] if 'train' in kwargs else None,
-#         'class': ob.__class__.__name__,
-#         'event': mname,
-#         'metrics': kwargs['metrics']
-#     }
-#     if 'last_input' in kwargs:  # add pseudo-hash of data
-#         record['last_input'] = str(tools.find_interesting(kwargs['last_input'], 3))
-#     if 'last_metrics' in kwargs:
-#         record['last_metrics'] = str(kwargs['last_metrics'])
-#     cblog.append(record)
-#     return True
-
-# from csv import DictWriter
-# def dump_it(filename='out.csv'):
-#     with open(filename, 'w', newline='') as csvfile:
-#         fieldnames = ['epoch', 'iter','num_batch', 'train', 'class', 'event', 'last_input', 'last_metrics']
-#         csvwriter = DictWriter(csvfile, fieldnames, quoting=csv.QUOTE_NONNUMERIC)
-#         csvwriter.writeheader()
-#         for record in cblog:
-#             csvwriter.writerow(record)
-
