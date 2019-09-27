@@ -7,8 +7,7 @@ from fastai import vision
 from multispectral import windows
 from multispectral import corine
 from multispectral import bands
-from infra.learnerplus import LearnerPlus, CycleHandler, Validate
-from infra.neptuneplus import SendToNeptune
+from infra import *
 
 """Models for working with Landsat / Corine data"""
 
