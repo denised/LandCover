@@ -292,6 +292,39 @@ class CycleHandler(Callback):
 
 
 
+# from multispectral import tools
+# cblog = []
+# def log_it(ob, mname, **kwargs):
+#     record = {
+#         'epoch': kwargs['epoch'],
+#         'iter': kwargs['iteration'],
+#         'num_batch': kwargs['num_batch'],
+#         'train': kwargs['train'] if 'train' in kwargs else None,
+#         'class': ob.__class__.__name__,
+#         'event': mname,
+#         'metrics': kwargs['metrics']
+#     }
+#     if 'last_input' in kwargs:  # add pseudo-hash of data
+#         record['last_input'] = str(tools.find_interesting(kwargs['last_input'], 3))
+#     if 'last_output' in kwargs:  # add pseudo-hash of data
+#         record['last_output'] = str(tools.find_interesting(kwargs['last_output'], 3))
+#     if 'last_target' in kwargs:  # add pseudo-hash of data
+#         record['last_target'] = str(tools.find_interesting(kwargs['last_target'], 3))
+#     if 'last_metrics' in kwargs:
+#         record['last_metrics'] = str(kwargs['last_metrics'])
+#     cblog.append(record)
+#     return True
+#
+# from csv import DictWriter
+# def dump_it(filename='out.csv'):
+#     with open(filename, 'w', newline='') as csvfile:
+#         fieldnames = ['epoch', 'iter','num_batch', 'train', 'class', 'event', 'last_input', 'last_metrics']
+#         csvwriter = DictWriter(csvfile, fieldnames, quoting=csv.QUOTE_NONNUMERIC)
+#         csvwriter.writeheader()
+#         for record in cblog:
+#             csvwriter.writerow(record)
+
+
 class LRAccumulator(object):
     """Accumulate multiple recorder results to compare them on the same graph.  Can be applied across any Learner fit method
     (lr_find, fit, etc.), and a single accumulator can be used across multiple learners, models, data... anything where you'd like

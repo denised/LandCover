@@ -142,6 +142,7 @@ class CorineDataStats(Callback):
         self.stats = [0] * 5
     
     def on_batch_end(self, last_target, last_output, train, **kwargs):
+        #infra.log_it(self, 'on_batch_end', last_target, last_output, train, **kwargs)
         if train:
             last_target = last_target.detach()    # dunno if we need to detach or not, but it doesn't hurt
             last_output = last_output.detach().sigmoid()   # shouldn't have to know to put sigmoid() here!
@@ -156,15 +157,8 @@ class CorineDataStats(Callback):
                 biglo = lo.ge(0.7)   # in numpy, this would be lo[lo>0.7].sum()
                 self.stats[4] += torch.masked_select(lo,biglo).sum()
     
-    def on_epoch_end(self, num_batch, last_metrics, last_target, **kwargs):
-        stats = [ 0.0 for x in self.stats ]
-        try: # protect divide by zero or anything else that might happen.
-            size = num_batch * last_target.numel() // last_target.size()[1]
-            stats = [ math.floor( 100 * x / size ) for x in self.stats ]
-        except:
-            pass
-
-        return { 'last_metrics' : last_metrics + stats }
+    def on_epoch_end(self, last_metrics, **kwargs):
+        return { 'last_metrics' : last_metrics + self.stats }
         
     # For reasons I don't understand, Callback __repr__ breaks on this class, so overriding here...
     # Somehow (perhaps because Jupyter/IPython?), the methods get wrapped, and the call to func_args()
@@ -177,14 +171,3 @@ def standard_monitor(n=100):
     """Construct a cycle monitor with standard stuff in it"""
     cbs = [ CorineDataStats(), Validate, SendToNeptune ]
     return CycleHandler.create(n=n, callbacks = cbs)
-
-
-class SumQuadLoss(nn.Module):
-    def __init__(self, epsilon=0.01):
-        super().__init__()
-        self.epsilon = epsilon
-    
-    def forward(self, input, target):
-        # TODO: apply epsilon to target
-        input2 = torch.sigmoid(input)
-        return torch.pow( input2 - target, 4).sum()

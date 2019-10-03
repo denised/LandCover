@@ -15,9 +15,8 @@ def set_defaults(**overrides):
             metrics = [],
             model_directory = 'models',
             callback_fns = [],
-            train_end = None,      # If using TrainEnd callback, how many iterations to run before terminating fit
-            trace_frequency = 20,  # If using LearnTracer callback, how frequently to perform validation and print out loss and valid_loss
-            trace_pdb = False,     # if using LearnTracer callback and a trace event occurs, drop into the debugger
+            train_end = None,      # If using TrainEnd callback, how many iterations to run before terminating
+            trace_pdb = False,     # if using LearnerTracer callback and a trace event occurs, drop into the debugger
             clean_frequency = 100,  # If using LearnerCleaner callback, how often to clean up
             default_init = True
         )

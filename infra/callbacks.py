@@ -2,7 +2,11 @@ import torch
 import numpy as np
 from fastai.basic_train import *
 from fastai.core import defaults, ifnone
+from fastai.callback import Callback
 from functools import partial
+
+# Some of these callbacks are meant to be used with CycleHandler.  Specifically, the way that metrics add themselves to the list of
+# metrics is correct with CycleHandler, but not with Recorder
 
 class Validate(LearnerCallback):
     """Run validation on demand, potentially with a list of callbacks.  The callbacks would most likely be used to do test time augmentation (TTA)."""
@@ -31,13 +35,9 @@ class Validate(LearnerCallback):
         return { 'last_metrics' : last_metrics }
 
 class LearnerTracer(LearnerCallback):
-    """Print out various things as they occur.  Best used with "silent=True" argument to fit.
-    Checks for nans on forward and backward, and also checks for zero-grads on backward"""
-
-    def on_train_begin(self, pbar, **kwargs):
-        self.pbar = pbar
+    """Print warnings for certain occurrances: forward data containing nans, or gradients that either contain nan or are all-zero."""
+    def on_train_begin(self, **kwargs):
         self.hooks = []
-        self.halfmessage = ""
         
         def hook(module, input, output, name):
             if module.training and torch.isnan(output).sum().item() > 0:
@@ -48,29 +48,9 @@ class LearnerTracer(LearnerCallback):
         for n, m in self.learn.model.named_modules():
             self.hooks.append( m.register_forward_hook( partial(hook, name=n) ))
 
-    def on_batch_end(self, num_batch, last_loss, **kwargs):
-        if num_batch % defaults.trace_frequency == 0:
-            with self.learn.pause_training():
-                result = validate(self.learn.model, self.learn.data.valid_dl, loss_func=self.learn.loss_func, pbar=self.pbar)
-                print("batch {:3d}: {} loss: {:8.4f}  val_loss: {:8.4f}".format( num_batch, self.halfmessage, last_loss, result ))
-        else:
-            print(".", end='')
-    
-    def on_backward_end(self, num_batch, **kwargs):
-        # periodically report the gradient sum range and mean
-        if num_batch % defaults.trace_frequency == 0:
-            stats = np.array([ p.grad.abs().sum().item() for p in self.learn.model.parameters() if p.grad is not None])
-            # stash the print messag in a string so that it gets picked up on_batch_end
-            # this prevents it from being overwritten by the recorder's status bar on plain terminal
-            if len(stats) > 0:
-                self.halfmessage = "grad mags: min {:8.3f}, max {:8.3f}, mean {:8.3f}; ".format( stats.min(), stats.max(), stats.mean())
-            else:
-                self.halfmessage = ""
-        
-        # always check all the grads for either nan or all-zeros
-        # Getting data back from the GPU is expensive, so we first do a check of all grads together, and only if we find an issue
-        # do we check them individually.
-        
+    def on_backward_end(self, **kwargs):
+        # Check the gradients
+        # For better perf, first do a check of all grads together, and only if we find an issue do we check them individually.
         zeroifbad = [ (p.grad == p.grad).prod()   *   p.grad.ne(0).sum() for p in self.learn.model.parameters() if p.grad is not None ]
         #  zero if            some nan            or       all-zero
 
@@ -89,9 +69,19 @@ class LearnerTracer(LearnerCallback):
         for hook in self.hooks:
             hook.remove()
 
+class GradientMetrics(LearnerCallback):
+    """Report gradient magnitude means.  Gives a very rough estimate of how much the model is changing.
+    Gradients are sampled at the epoch end (not accumulated over the epoch)."""
+    def on_train_begin(self, metrics_names, **kwargs):
+        return { 'metrics_names' : metrics_names +  ["min GMM", "mean GMM", "max GMM"] }
+    
+    def on_epoch_end(self, last_metrics, **kwargs):
+        stats = np.array([ p.grad.abs().mean().item() for p in self.learn.model.parameters() if p.grad is not None])
+        return { 'last_metrics': last_metrics + stats }
+
 
 class TrainEnder(LearnerCallback):
-    # Note: fastai has a callback just like this, but I like setting the trace_end parameter via defaults instead of __init__.
+    # Note: fastai has a callback just like this, but I like setting the train_end parameter via defaults instead of __init__.
     # Makes initializing it cleaner.
     def on_batch_end(self, num_batch, **kwargs):
         if defaults.train_end and num_batch >= defaults.train_end:
@@ -106,3 +96,121 @@ class LearnerCleaner(LearnerCallback):
             self.learn.recorder.losses = []
             self.learn.recorder.lrs = []
             self.learn.recorder.moms = []
+
+
+#############################################################################################################
+#
+# LOSS Functions
+#
+#############################################################################################################
+#
+# There are too many possible variations here...it is confusing
+#    whether/which activation function (which depends on whether the model already does it and what the loss function expects)
+#    packing multiple values into a single function (for reporting purposes)
+#    the distinction between training (autograd=True) and reporting (autograd=False)
+#    auto averaging across batches (or not)
+#    form (function, nn.Module, Callback)
+#
+# And to this we want to add one more: epsilon shrinking of the target (moving values away from 0 and 1 endpoints).
+#
+# Fastai has some of this figured out, but not all of it.
+# Figuring out the right architecture to do minimal code and graft cleanly onto what fastai already does...
+# too hard for now.  These will work.
+
+class TrainLoss(object):
+    """Wrapper around a loss function to apply activation and or epsilon shrinking of target"""
+    def __init__(self, fn, activation=torch.sigmoid, epsilon=None):
+        self.loss_fn = fn
+        self.activation = activation
+        if callable(epsilon):
+            self.epsilon = epsilon
+        elif isinstance(epsilon, float):
+            self.epsilon = lambda t, e=epsilon: e + (t * (1-2*e))
+        else:
+            assert epsilon is None
+            self.epsilon = None
+    
+    def __call__(self, prediction, target):
+        prediction2 = self.activation(prediction) if self.activation else prediction
+        target2 = self.epsilon(target) if self.epsilon else target
+        return self.loss_fn(prediction2, target2)
+
+
+class ReportLoss(Callback):
+    """Wrapper around loss function to apply activation and or epsilon shrinking of target.  
+    ReportLoss is applied per-epoch only (use AverageMetric instead to accumulate)."""
+    def __init__(self, fn, name, activation=torch.sigmoid, epsilon=None):
+        super().__init__(self)
+        self.loss_fn = fn
+        self.name = name
+        self.activation = activation
+        if callable(epsilon):
+            self.epsilon = epsilon
+        elif isinstance(epsilon, float):
+            self.epsilon = lambda t, e=epsilon: e + (t * (1-2*e))   # TODO: inplace version?, e.g. torch.add_
+        else:
+            assert epsilon is None
+            self.epsilon = None
+    
+    def on_train_begin(self, metrics_names, **kwargs):
+        return { 'metrics_names': metrics_names + [ self.name ] }
+    
+    def on_epoch_end(self, last_output, last_target, last_metrics, **kwargs):
+        prediction = last_output.detach()
+        prediction2 = self.activation(prediction) if self.activation else prediction
+        target = last_target.detach()
+        target2 = self.epsilon(target) if self.epsilon else target
+        result = self.loss_fn(prediction2, target2)
+        last_metrics.append(result)
+        return { 'last_metrics': last_metrics }
+
+
+
+def quad_mean_loss(predicted, target):
+    """Take the fourth power of the difference between input and target.
+    This is intended as a form of Focal Loss (loss that penalizes being 'very wrong' much more than
+    being 'a little wrong').  See https://arxiv.org/abs/1708.02002, in particular Appendix A"""
+    return torch.pow( predicted - target, 4).mean()
+
+
+def other_dimensions(ndims, exclude):
+    """Return a tuple of the dimensions up to ndims, _not_ including those in exclude."""
+    return list(set(range(ndims)) - set(listify(exclude)))
+
+def class_weights(target, weight_index=1):
+    """Return a vector of relative weights, one for each class in target.  In the non-binary case, it is a vector of relative density."""
+    # we need a vector of all other indexes except the weight index.
+    other_dims = other_dimensions(len(target.shape),weight_index)
+    wts = target.sum(other_dims)
+    return wts / wts.sum()
+
+# There are a lot of different definitions of IoU and Dice scores, and while some of them are just algebraic rearrangements
+# of the same formula, some aren't.  For the record, here is how I am interpreting the original binary measures:
+#
+#  IoU  = intersection / union 
+#       = TP / (TP + FP + FN)
+#  Dice = 2 * intersection / (union + intersection) 
+#       = (2 * TP) / ((2 * TP) + FP + FN)
+#
+#  Since IoU and Dice are measures of similarity,  1 - Dice and 1 - IoU are measures of loss
+
+def weighted_dice(predicted, target, weight_index=1):
+    """Weighted Dice loss measure, computed separately for each class, then summed.
+    The score for each class is weighted by the inverse of it's squared prevalence in the sample.
+    See https://arxiv.org/abs/1707.03237."""
+    wts = class_weights(target, weight_index)
+    wts = 1 / (wts * wts + 0.00001)
+
+    sumdims = other_dimensions(len(target.shape),weight_index)
+    intersection = (target * predicted).sum(sumdims)
+    intersection = (intersection * wts).sum()
+
+    uplusi = (target + predicted).sum(sumdims)
+    uplusi = (uplusi * wts).sum()
+
+    return 2 * intersection / uplusi
+
+def dice(predicted, target):
+    intersection = (target * predicted).sum()
+    union = (target + predicted).sum()
+    return 2 * ( intersection / union )
