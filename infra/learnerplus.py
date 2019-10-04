@@ -4,8 +4,8 @@ from functools import partial
 from matplotlib import pyplot
 import torch
 import fastai
-from fastai.callbacks import Callback
 from fastai.basic_train import *
+from fastai.callback import *
 from fastai.basic_data import DataBunch, DeviceDataLoader
 from torch.utils.data.dataloader import DataLoader
 from fastai.core import defaults, ifnone
@@ -190,7 +190,7 @@ class CycleHandler(Callback):
         """Initialize the cyclehandler for a cycle length of n batches.  Callbacks must be an array, each element of which may be one
         of following three things:
             * a callback object
-            * a class (which is instantiated to create a callback object), or
+            * a class which can be instantiated to create a callback object, or
             * a function.  Functions are assumed to compute a metric over a batch, and are automatically wrapped in AverageMetric to return the average of
             that function over all batches in the cycle.
         Collectively this covers the cases supported via various features of Learner and CallbackHandler"""
@@ -199,7 +199,9 @@ class CycleHandler(Callback):
         self.count = 0
         self.callbacks = []
         for c in callbacks:
-            if isinstance(c, type):
+            if isinstance(c, Callback):
+                pass
+            elif isinstance(c, type):
                 c = c(learner)
             elif callable(c):
                 c = AverageMetric(c)
