@@ -6,11 +6,9 @@ from fastai.basics import *
 from fastai import vision
 from multispectral import windows
 from multispectral import corine
-from multispectral import bands
 from infra import *
 
 """Models for working with Landsat / Corine data"""
-
 
 class Simple(LearnerPlus):
     """A simple sequence of (convolution, ReLU) pairs.  No up or down scaling."""
@@ -33,7 +31,7 @@ class Simple(LearnerPlus):
         return windows.WindowedDataset(input_data, corine.corine_labeler, *corine.corine_attributes())
        
     @classmethod
-    def create(cls, tr_data, val_data, channels=(6,25,11), conv_size=None, title="<untitled>", bs=None, **kwargs):
+    def create(cls, tr_data, val_data, channels=(6,25,11), conv_size=None, bs=None, **kwargs):
         """Create a learner with defaults."""
         l_args, d_args = cls._init_args(**kwargs)
    
@@ -41,13 +39,13 @@ class Simple(LearnerPlus):
         tr_ds = cls.create_dataset(tr_data)
         val_ds = cls.create_dataset(val_data)
         databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **d_args)
+        arch_description = f"{cls.__name__} channels={channels} conv_size={conv_size or 'default'}"
 
         model = cls.create_model(channels, conv_size)
 
         learner = Learner(databunch, model, **l_args)
-        learner.params = dict(channels=channels, conv_size=conv_size, bs=bs)
-        learner.title = title
         learner.__class__ = cls
+        learner.init_tracking(arch=arch_description)  # pylint: disable=no-member
         return learner
     
 
@@ -66,18 +64,18 @@ class ImageUResNet(LearnerPlus):
         return windows.WindowedDataset(input_data, rgb_label, *corine.corine_attributes())
     
     @classmethod
-    def create(cls, tr_data, val_data, arch=vision.models.resnet18, title="<untitled>", bs=None, **kwargs):
+    def create(cls, tr_data, val_data, arch=vision.models.resnet18, bs=None, **kwargs):
         l_args, d_args = cls._init_args(**kwargs)
 
         bs = ifnone(bs, defaults.batch_size)
         tr_ds = cls.create_dataset(tr_data)
         val_ds = cls.create_dataset(val_data)
         databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **d_args)
+        arch_description = f"{cls.__name__} arch={arch}"
 
         learner = vision.unet_learner(databunch, arch, **l_args)
-        learner.params = dict(arch=arch, bs=bs)
-        learner.title = title
         learner.__class__ = cls
+        learner.init_tracking(arch=arch_description)  # pylint: disable=no-member
         return learner
 
 
@@ -108,17 +106,17 @@ class MultiUResNet(LearnerPlus):
         return windows.WindowedDataset(input_data, corine.corine_labeler, *corine.corine_attributes())
 
     @classmethod
-    def create(cls, tr_data, val_data, arch='resnet18', title="<untitled>", bs=None, **kwargs):
+    def create(cls, tr_data, val_data, arch='resnet18', bs=None, **kwargs):
         l_args, d_args = cls._init_args(**kwargs)
 
         bs = ifnone(bs, defaults.batch_size)
         tr_ds = cls.create_dataset(tr_data)
         val_ds = cls.create_dataset(val_data)
         databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **d_args)
+        arch_description = f"{cls.__name__} arch={arch}"
 
         genfn = lambda _, arch=arch : cls.create_resnet(arch)
         learner = vision.unet_learner(databunch, genfn, pretrained=False, **l_args)
-        learner.params = dict(arch=arch, bs=bs)
-        learner.title = title
         learner.__class__ = cls
+        learner.init_tracking(arch=arch_description)  # pylint: disable=no-member
         return learner

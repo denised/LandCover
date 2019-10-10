@@ -1,10 +1,11 @@
 import torch
-import numpy as np
 from fastai.basic_train import *
 from fastai.core import defaults, ifnone, listify
 from fastai.callback import Callback
 from functools import partial
 from pathlib import Path
+
+# pylint: disable=arguments-differ
 
 # Some of these callbacks are meant to be used with CycleHandler.  Specifically, the way that metrics add themselves to the list of
 # metrics is correct with CycleHandler, but not with Recorder
@@ -40,7 +41,7 @@ class LearnerTracer(LearnerCallback):
     def on_train_begin(self, **kwargs):
         self.hooks = []
         
-        def hook(module, input, output, name):
+        def hook(module, input, output, name):  # pylint: disable=unused-argument,redefined-builtin
             if module.training and torch.isnan(output).sum().item() > 0:
                 print("warning: {} output: nan(s)".format(name))
                 if defaults.trace_pdb:

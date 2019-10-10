@@ -18,7 +18,6 @@ def set_defaults(**overrides):
             class_index = 1,       # The index of a batch that represents class.  (Usually 1 or -1)
             train_end = None,      # If using TrainEnd callback, how many iterations to run before terminating
             trace_pdb = False,     # if using LearnerTracer callback and a trace event occurs, drop into the debugger
-            clean_frequency = 100,  # If using LearnerCleaner callback, how often to clean up
             classnames = [  # copied from multispectral.bands so I don't have to cross-import
                 'mask',   # 1 if data, 0 if none
                 'water',
@@ -31,6 +30,7 @@ def set_defaults(**overrides):
                 'urban',
                 'cloud',
                 'shadow'],
+            traintracker_store = None,   # See traintracker.py
             default_init = True
         )
     if len(overrides):

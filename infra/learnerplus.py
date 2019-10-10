@@ -5,11 +5,12 @@ from matplotlib import pyplot
 import torch
 import fastai
 from fastai.basic_train import *
-from fastai.callback import *
+from fastai.callback import Callback
 from fastai.basic_data import DataBunch, DeviceDataLoader
 from torch.utils.data.dataloader import DataLoader
 from fastai.core import defaults, ifnone
 from fastai.torch_core import rank_distrib, try_save
+from .traintracker import TrainTracker
 
 ################################################
 # Our augmentation of the fastai Learner class (and related classes)
@@ -17,6 +18,7 @@ from fastai.torch_core import rank_distrib, try_save
 # * Make it easy to substitute new data into an existing Learner
 # * Support export/import of Learner state without Dataset
 # * Do end-epoch stuff every n batches instead of the actual epoch length
+# * Support experiment tracking (via TrainTracker)
 
 class LearnerPlus(Learner):
     
@@ -25,7 +27,7 @@ class LearnerPlus(Learner):
     def export(self, file='export.pkl', destroy=False):
         "Export the state of the `Learner` to path"
         if rank_distrib(): return # don't save if slave proc
-        args = ['opt_func', 'loss_func', 'metrics', 'true_wd', 'bn_wd', 'wd', 'train_bn', 'callback_fns', 'params']
+        args = ['opt_func', 'loss_func', 'metrics', 'true_wd', 'bn_wd', 'wd', 'train_bn', 'callback_fns', 'parameters']
         state = {a:getattr(self,a) for a in args}
         state['cb_state'] = {cb.__class__:cb.get_state() for cb in self.callbacks}
         state['model'] = self.model
@@ -41,12 +43,13 @@ class LearnerPlus(Learner):
         model = state.pop('model')
         cb_state = state.pop('cb_state')
         clas_func = state.pop('cls')
-        params = state.pop('params', {})
+        params = state.pop('parameters', {})
         data = DummyDataBunch()
         res = clas_func(data, model, **state)
         res.callback_fns = state['callback_fns'] #to avoid duplicates
         res.callbacks = [fastai.basic_train.load_callback(c,s, res) for c,s in cb_state.items()]
-        res.params = params
+        if 'data' in params: del params['data']
+        res.parameters = params
         if not ((tr_data is None) or (val_data is None)):
             res.set_data(tr_data, val_data)
         return res
@@ -58,11 +61,12 @@ class LearnerPlus(Learner):
         raise NotImplementedError
     
     def set_data(self, tr_data, val_data, bs=None):
-        """Set data sources for this learner.  There is nothng magic in this method; it is just syntactic sugar to make the common case simpler."""
+        """Set data sources for this learner."""
         tr_ds = self.create_dataset(tr_data)
         val_ds = self.create_dataset(val_data)
         bs = ifnone(bs, defaults.batch_size)
         self.data = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs))
+        if 'data' in self.parameters: del self.parameters['data']  # force recomputation
     
     @contextmanager
     def temporary_validation_set(self, x_dataset, pause_train=True):
@@ -110,12 +114,24 @@ class LearnerPlus(Learner):
         }
         return learner_args, kwargs
     
+    def init_tracking(self, **kwargs):
+        """Initialize additional learner state specific to LearnerPlus.  kwargs adds to or overrides this state."""
+        # See the documentation at the top of traintracker for the fields and their meanings:
+        self.parameters = {
+            "code_marker" : "",  # hardwired description of significant code update
+        }
+        self.parameters.update(kwargs)
+        self.callback_fns.insert(0,TrainTracker)
+        # default setting when we create a *new* model only
+        # we set it so that model state is loaded, it can pick up the tracker id
+        TrainTracker.set_model_id(self.model,"empty")
+    
     # This is crappy architecture, but it will work for now.
-    def _extra_run_params(self, kwargs):
+    def _pre_fit(self, kwargs):
         """Add a few extra keyword parameters that we will accept in fit, lr_find, etc."""
-        # If a 'description' keyword is present, store it (handed off to neptune)
+        # If a 'description' keyword is present, store it (handed off to TrainTracker)
         if 'description' in kwargs:
-            self.description = kwargs['description']
+            self.parameters['description'] = kwargs['description']
             del kwargs['description']
         
         # If a 'neptune' keyword is present, that will control whether neptune records this run or not
@@ -123,31 +139,33 @@ class LearnerPlus(Learner):
             self.do_neptune = kwargs['neptune']
             del kwargs['neptune']
         
-        # if 'epoch_length' in kwargs:
-        #     self.epoch_length = kwargs['epoch_length']
-        #     del kwargs['epoch_length']
-        # else:
-        #     self.epoch_length = defaults.epoch_length
 
-    def fit(self, *args, **kwargs):
-        self._extra_run_params(kwargs)
-        #import pdb; pdb.set_trace()
-        # if self.epoch_length:
-        #     # add callback shortener to callbacks list if requested
-        #     callbacks = kwargs['callbacks'] if 'callbacks' in kwargs else []
-        #     callbacks.append( EpochShortener(self.epoch_length) )
-        #     kwargs['callbacks'] = callbacks
+    def fit(self, *args, **kwargs):  # pylint: disable=arguments-differ
+        self._pre_fit(kwargs)
+        self.parameters['epochs'] = args[0]
+        self.parameters['parameters'] = TrainTracker.describe_parameters(args,kwargs)
+        if 'invocation' not in self.parameters:
+            self.parameters['invocation'] = "fit"       
+
         super().fit(*args, **kwargs)
-        # clean up; only needed here in fit b/c the fit_one_cycle and lr_find both call fit
+
+        # clean up
         if hasattr(self,'do_neptune'): del self.do_neptune
+        del self.parameters['epochs']
+        del self.parameters['parameters']
+        del self.parameters['invocation']
     
     def fit_one_cycle(self, *args, **kwargs):
-        self._extra_run_params(kwargs)
-        super().fit_one_cycle(*args, **kwargs)
+        self._pre_fit(kwargs)
+        self.parameters['invocation'] = "fit-one-cycle"
+        super().fit_one_cycle(*args, **kwargs)  # pylint: disable=no-member
     
     def lr_find(self, *args, **kwargs):
-        self._extra_run_params(kwargs)
-        super().lr_find(*args, **kwargs)
+        self._pre_fit(kwargs)
+        self.parameters['invocation'] = "lr_find"
+        super().lr_find(*args, **kwargs) # pylint: disable=no-member
+
+
 
 class DummyDataBunch(DataBunch):
     def __init__(self):

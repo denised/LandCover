@@ -1,5 +1,4 @@
 import logging
-import platform
 import fastai
 import neptune
 
@@ -13,7 +12,7 @@ import neptune
 # of things differently:
 #  * recognizes if neptune hasn't been initialized and continues anyway
 #  * auto initialization of experiments (tied to training runs)
-# 
+#  * knows about and uses our traintracker parameters
 
 _logger = logging.getLogger(__name__)
 
@@ -23,7 +22,7 @@ class SendToNeptune(fastai.basic_train.LearnerCallback):
         self.exp = None
         self.own_exp = False  # if true, we created the experiment, so we should stop it
 
-    def on_train_begin(self, metrics_names, **kwargs):
+    def on_train_begin(self, metrics_names, **kwargs):        # pylint: disable=arguments-differ
         # check to see if the user has turned neptune off
         if getattr(self.learn, 'do_neptune', True) == False:
             return
@@ -33,14 +32,7 @@ class SendToNeptune(fastai.basic_train.LearnerCallback):
         except neptune.exceptions.NoExperimentContext:
             # we normally expect to end up here.
             # get the parameters of this training to pass to neptune
-            params = getattr(self.learn, 'params', {})
-            params.update(
-                opt=self.learn.opt,
-                loss_func=self.learn.loss_func,
-                callbacks=self.learn.callbacks,
-                clstype=type(self.learn),
-                machine=platform.node()
-            )
+            params = getattr(self.learn, 'parameters', {})
             title = getattr(self.learn, 'title', '')
             description = getattr(self.learn, 'description', '')
             try:
