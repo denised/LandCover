@@ -103,6 +103,21 @@ def randomer_split(lst:WindowList, tsize=None, vsize:int=256) -> Tuple[WindowLis
         tsize = len(lst) - vsize
     return lst[:tsize], lst[tsize:tsize+vsize]
 
+def chunked_split(lst:WindowList, stride:int=200, chunk:int=20, tsize=None, vsize=256) -> Tuple[WindowList,WindowList]:
+    """Split windows list into training and validation sets by chunks, which allows access to varied data while preserving 
+    some of the performance benefit of ordered access within a tile."""
+    lst = list(lst)
+    permuted=[]
+    for i in range(0,stride,chunk):
+        for j in range(0,len(lst),stride):
+            start=i+j
+            end=start+chunk
+            if start >= len(lst): continue
+            if end >= len(lst): end=len(lst)
+            permuted += lst[start:end]
+    if tsize is None: tsize = -vsize
+    return permuted[:tsize], permuted[-vsize:]
+
 class WindowedDataset(torch.utils.data.dataset.Dataset):
     def __init__(self, windows:WindowList, labeler:Labeler, c:int, classes:Tuple[str]):
         """
