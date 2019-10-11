@@ -143,9 +143,8 @@ class LearnerPlus(Learner):
     def fit(self, *args, **kwargs):  # pylint: disable=arguments-differ
         self._pre_fit(kwargs)
         self.parameters['epochs'] = args[0]
-        self.parameters['parameters'] = TrainTracker.describe_parameters(args,kwargs)
-        if 'invocation' not in self.parameters:
-            self.parameters['invocation'] = "fit"       
+        if 'parameters' not in self.parameters: self.parameters['parameters'] = TrainTracker.describe_parameters(self,**kwargs)
+        if 'invocation' not in self.parameters: self.parameters['invocation'] = "fit"       
 
         super().fit(*args, **kwargs)
 

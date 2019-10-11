@@ -1,6 +1,6 @@
 import requests
 import platform
-import traceback
+import hashlib
 from datetime import datetime
 import torch
 from fastai.basic_train import LearnerCallback
@@ -20,7 +20,7 @@ columns = [
     'loss_func',   # Identification of the Loss Function used
     'optimizer',   # Identification of the optimizer used
     'invocation',  # LS -- Fit, vs fit-one-cycle, etc.
-    'cycles',      # LS -- Number of cycles (full epochs) the experiment is to run for
+    'epochs',      # LS -- Number of full epochs the experiment is to run for
     'parameters'   # LS -- top-level parameters such as learning rate, weight decay
     'completed',   # total number of batches that were completed
     'metrics',     # Some small set of statistics identifying the loss/accuracy, etc. for the entire run
@@ -85,7 +85,7 @@ class TrainTracker(LearnerCallback):
     
     def on_error(self, exception):
         p = self.learn.parameters
-        p['completed'] = stackfind('something', 'iteration')
+        p['completed'] = 0  #stackfind('something', 'iteration')
         p['duration'] = datetime.now()-self.started
         p['error'] = exception 
     
@@ -106,8 +106,13 @@ class TrainTracker(LearnerCallback):
             return str(ob)
     
     @classmethod
-    def describe_parameters(cls, args, kwargs, add=""):
-        return "TODO" + add
+    def describe_parameters(cls, learner, lr=None, wd=None, **kwargs):   # pylint: disable=unused-argument
+        # I don't like that I'm copying the fastai code, but I don't have any way to intercept the state that fit computes internally
+        # Also, we should be able to expand with additional parameters as needed.
+        lr = ifnone(lr, defaults.lr)
+        wd = ifnone(wd, learner.wd)
+        bs = learner.data.train_dl.batch_size
+        return f"lr={lr} wd={wd} bs={bs}"
     
     # ######## Sneak an id into model data so that we can retrieve it later
     #
@@ -115,6 +120,7 @@ class TrainTracker(LearnerCallback):
     def set_model_id(cls, model, model_id):
         """Add the id to model, so we can retrieve it again later.  This should be done _after_ a run, but 
         before the model is saved."""
+        # The string has to be fixed length to prevent torch from complaining when reloading.
         model_id = f"{model_id:24.24}"
         encoded_id = torch.tensor( list(model_id.encode()), dtype=torch.uint8 )  # pylint: disable=not-callable,no-member
         if not hasattr(model, 'tracker_id'):
@@ -138,35 +144,51 @@ class TrainTracker(LearnerCallback):
 
     def describe_data(self):
         """Return an identifier for the current data.  This implementation is very magic (understands my data setup)."""
-        # Get (1) The date on the all_windows csv file
-        # (2) The lengths of the training and validation sets
-        # (3) A hash signature of those sets
-        # Together these allow to determine reasonably if the same data was used, but not much more.
-        # trn = self.learn.data.train_ds
-        # val = self.learn.data.val_ds
-        return "TODO"
+        # (1) The lengths of the training and validation sets
+        # (2) A hash signature of those sets
+        # The hash signature alone would be enough, but the lengths are easier to read quickly and may be useful info as well.
+        # Someday we'd like to add the sample-generation method as well
+ 
+        train_set = self.learn.data.train_ds.windows
+        val_set = self.learn.data.valid_ds.windows
+        
+        encoder = hashlib.md5()
+        encoder.update(b"train")
+        for w in train_set:
+            encoder.update( str(w).encode() )
+        encoder.update(b"val")
+        for w in val_set:
+            encoder.update( str(w).encode() )
+        
+        return f"t:{len(train_set)} v:{len(val_set)} {encoder.hexdigest()}"
+
 
     def get_metrics(self, kwargs):
-        return "TODO"
+        stats = [ kwargs['last_loss']] + kwargs['last_metrics']
+        names = ['tloss', 'vloss'] + self.learn.recorder.metrics_names
+        printed = []
+        for n,s in zip(names, stats):
+            printed.append( n + '=' + (str(s) if isinstance(s, int) else '#na#' if s is None else f'{s:.6f}'))
+        return " ".join(printed)
+    
+    def __str__(self):
+        return "TrainTracker()"
 
 
-def stackfind(param_name, stack=None, matching=None):
-    """Find the value of a parameter named param_name on traceback stack (the most recent error traceback by default).
-    If matching is provided, the function name must contain that substring."""
-    # TODO
-    return "0"
+# def stackfind(param_name, stack=None, matching=None):
+#     """Find the value of a parameter named param_name on traceback stack (the most recent error traceback by default).
+#     If matching is provided, the function name must contain that substring."""
+#     # TODO
+#     return "0"
 
 #########################################################
-# Where the data gets written. This is my setup; you can replace it with anything you like by changing defaults.traintracker_store.
+# Where the data gets written.  A webhook is one way to do it, but you can use whatever other technique you would like
+# by assigning a different object to defaults.traintracker_store
+#
+# In my setup, I use a Google Sheets document as my target, with a scripted webhook following these instructions:
+# http://mashe.hawksey.info/2014/07/google-sheets-as-a-database-insert-with-apps-script-using-postget-methods-with-ajax-example/
 
-class TrackerGoogleSheetStore(object):
-    """
-    Store data in a Google Sheets document.  
-    
-    The document must be set up following the instructions here:
-    http://mashe.hawksey.info/2014/07/google-sheets-as-a-database-insert-with-apps-script-using-postget-methods-with-ajax-example/
-    """
-
+class TrainTrackerWebHook(object):
     def __init__(self, service_uri):
         self.service_uri = service_uri
     
@@ -174,4 +196,4 @@ class TrackerGoogleSheetStore(object):
         """values is a dictionary of field values to write.  Writing is append-only, so all the data about a single training
         run needs to be written in a single call."""
         
-        return requests.post(self.service_uri, values).json()
+        return requests.post(self.service_uri, values).json()   # return value is just for debugging.
