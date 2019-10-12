@@ -31,12 +31,18 @@ class SendToNeptune(fastai.basic_train.LearnerCallback):
             self.exp = neptune.get_experiment()
         except neptune.exceptions.NoExperimentContext:
             # we normally expect to end up here.
-            # get the parameters of this training to pass to neptune
-            params = getattr(self.learn, 'parameters', {})
-            title = getattr(self.learn, 'title', '')
-            description = getattr(self.learn, 'description', '')
+            # get the parameters of this training to pass to neptune (depends on TrainTracker to have set them)
+            p = self.learn.parameters
+            name = p.get('train_id', "none")
+            params = {}
+            # pass a subset of the parameters to Neptune
+            for k in ['arch','loss_func', 'parameters','machine']:
+                if k in p: params[k] = p[k]
+            description = p.get('description', "")
             try:
-                self.exp = neptune.create_experiment(name=title, description=description, params=params)
+                self.exp = neptune.create_experiment(
+                    name=name, description=description, params=params, 
+                    upload_source_files=[], upload_stdout=False, upload_stderr=False)
                 self.own_exp = True
             except neptune.exceptions.Uninitialized:
                 _logger.warn("Neptune not initialized; no tracing will be done")

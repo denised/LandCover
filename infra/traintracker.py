@@ -54,6 +54,7 @@ class TrainTracker(LearnerCallback):
 
     This code is hardwired into the learner in this repo.  You do not need to manually add it to callbacks.
     """
+    _order=-99
 
     # pylint: disable=arguments-differ
     
@@ -77,7 +78,7 @@ class TrainTracker(LearnerCallback):
         p = self.learn.parameters
         p['completed'] = iteration
         p['duration'] = str(datetime.now()-self.started)
-        if 'metrics' not in p: p['metrics'] = self.get_metrics(kwargs)
+        p['metrics'] = self.get_metrics(kwargs)
         self.set_model_id(self.learn.model, p['train_id'])
 
         if defaults.traintracker_store:
@@ -95,7 +96,7 @@ class TrainTracker(LearnerCallback):
     def generate_id(self):
         # we make these fixed width so that we can embed them in a tensor (see set_model_id)
         mname = self.learn.parameters['machine'][-10:]
-        return f"{self.started:%Y%m%d.%H%M} {mname:10.10}"
+        return f"{self.started:%Y%m%d.%H%M}.{mname:10.10}"
    
     def describe(self, ob):
         """If the object has a tracker_id attribute, use that to produce the result.  Otherwise simply apply the str() method"""
@@ -168,7 +169,7 @@ class TrainTracker(LearnerCallback):
         names = ['tloss', 'vloss'] + self.learn.recorder.metrics_names
         printed = []
         for n,s in zip(names, stats):
-            printed.append( n + '=' + (str(s) if isinstance(s, int) else '#na#' if s is None else f'{s:.6f}'))
+            printed.append( n + '=' + (str(s) if isinstance(s, int) else '##' if s is None else f'{s:.6f}'))
         return " ".join(printed)
     
     def __str__(self):
