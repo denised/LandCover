@@ -63,7 +63,7 @@ class TrainTracker(LearnerCallback):
         p = self.learn.parameters
         p['machine']    = platform.node()
         p['train_id']   = self.generate_id()
-        p['started']    = self.started.strftime('%d/%m/%y %H:%M')
+        p['started']    = self.started.strftime('%m/%d/%y %H:%M')
         p['base_model'] = self.get_model_id(self.learn.model)
         if 'loss_func' not in p: p['loss_func'] = self.describe(self.learn.loss_func)
         if 'optimizer' not in p: p['optimizer'] = self.describe(self.learn.opt_func)
@@ -74,21 +74,18 @@ class TrainTracker(LearnerCallback):
         if 'duration' in p:  del p['duration']
         if 'completed' in p: del p['completed']
     
-    def on_train_end(self, iteration, **kwargs):
+    def on_train_end(self, iteration, exception, **kwargs):
         p = self.learn.parameters
         p['completed'] = iteration
         p['duration'] = str(datetime.now()-self.started)
         p['metrics'] = self.get_metrics(kwargs)
         self.set_model_id(self.learn.model, p['train_id'])
 
+        if exception:
+            p['error'] = str(exception)
+
         if defaults.traintracker_store:
             defaults.traintracker_store.emit(p)
-    
-    def on_error(self, exception):
-        p = self.learn.parameters
-        p['completed'] = 0  #stackfind('something', 'iteration')
-        p['duration'] = datetime.now()-self.started
-        p['error'] = exception 
     
     ##################################################################################################################
     # All the ways we find, store, create, this data.
@@ -96,12 +93,12 @@ class TrainTracker(LearnerCallback):
     def generate_id(self):
         # we make these fixed width so that we can embed them in a tensor (see set_model_id)
         mname = self.learn.parameters['machine'][-10:]
-        return f"{self.started:%Y%m%d.%H%M}.{mname:10.10}"
+        return f"{self.started:%y%m%d.%H%M}.{mname:10.10}"
    
     def describe(self, ob):
-        """If the object has a tracker_id attribute, use that to produce the result.  Otherwise simply apply the str() method"""
-        if hasattr(ob, 'tracker_id'):
-            x = ob.tracker_id
+        """If the object has a tracker_description attribute, use that to produce the result.  Otherwise simply apply the str() method"""
+        if hasattr(ob, 'tracker_description'):
+            x = ob.tracker_description
             return str(x() if callable(x) else x)
         else:
             return str(ob)
@@ -121,7 +118,7 @@ class TrainTracker(LearnerCallback):
     def set_model_id(cls, model, model_id):
         """Add the id to model, so we can retrieve it again later.  This should be done _after_ a run, but 
         before the model is saved."""
-        # The string has to be fixed length to prevent torch from complaining when reloading.
+        # The string has to be fixed length to prevent torch from complaining about changed sizes when reloading
         model_id = f"{model_id:24.24}"
         encoded_id = torch.tensor( list(model_id.encode()), dtype=torch.uint8 )  # pylint: disable=not-callable,no-member
         if not hasattr(model, 'tracker_id'):
@@ -139,16 +136,15 @@ class TrainTracker(LearnerCallback):
     
     # ######## Describe the data used for this run
     # Most of the functionality in TrainTracker is at least somewhat generalized or generalizable.
-    # This function is the main exception: it knows *exactly* how my data is mangaged --- for example there no place else
-    # in the code that knows there is a csv file kept in the same directory as the data files.
+    # This function is the main exception: it is specific to windowed data sets
     # So someday, need to re-architect to not be so magic.
 
     def describe_data(self):
-        """Return an identifier for the current data.  This implementation is very magic (understands my data setup)."""
+        """Return an identifier for the current data.  (Works only for windowed data sets)."""
         # (1) The lengths of the training and validation sets
         # (2) A hash signature of those sets
         # The hash signature alone would be enough, but the lengths are easier to read quickly and may be useful info as well.
-        # Someday we'd like to add the sample-generation method as well
+        # Ideally this would be a method on DataBunch that could be overridden....
  
         train_set = self.learn.data.train_ds.windows
         val_set = self.learn.data.valid_ds.windows
@@ -163,31 +159,29 @@ class TrainTracker(LearnerCallback):
         
         return f"t:{len(train_set)} v:{len(val_set)} {encoder.hexdigest()}"
 
-
     def get_metrics(self, kwargs):
-        stats = [ kwargs['last_loss']] + kwargs['last_metrics']
-        names = ['tloss', 'vloss'] + self.learn.recorder.metrics_names
-        printed = []
-        for n,s in zip(names, stats):
-            printed.append( n + '=' + (str(s) if isinstance(s, int) else '##' if s is None else f'{s:.6f}'))
-        return " ".join(printed)
+        if 'last_metrics' in kwargs:
+            stats = [ kwargs['last_loss']] + kwargs['last_metrics']
+            names = ['tloss', 'vloss'] + self.learn.recorder.metrics_names
+            printed = []
+            for n,s in zip(names, stats):
+                printed.append( n + '=' + (str(s) if isinstance(s, int) else '##' if s is None else f'{s:.6f}'))
+            return " ".join(printed)
+        else:
+            return "##"
     
     def __str__(self):
         return "TrainTracker()"
-
-
-# def stackfind(param_name, stack=None, matching=None):
-#     """Find the value of a parameter named param_name on traceback stack (the most recent error traceback by default).
-#     If matching is provided, the function name must contain that substring."""
-#     # TODO
-#     return "0"
 
 #########################################################
 # Where the data gets written.  A webhook is one way to do it, but you can use whatever other technique you would like
 # by assigning a different object to defaults.traintracker_store
 #
-# In my setup, I use a Google Sheets document as my target, with a scripted webhook following these instructions:
+# In my setup, I use a Google Sheets document as my store, with a scripted webhook following these instructions:
 # http://mashe.hawksey.info/2014/07/google-sheets-as-a-database-insert-with-apps-script-using-postget-methods-with-ajax-example/
+# You can look at my log file and its setup here (at least until I change it)
+# https://docs.google.com/spreadsheets/d/1yiqsk1hiaZ5KPWiKolRVqM4WCHLoDRDgAo6vgqav3lY/edit?usp=sharing
+
 
 class TrainTrackerWebHook(object):
     def __init__(self, service_uri):
@@ -198,3 +192,13 @@ class TrainTrackerWebHook(object):
         run needs to be written in a single call."""
         
         return requests.post(self.service_uri, values).json()   # return value is just for debugging.
+
+#########################################################
+#  Make pretty descriptions for the two optimizers I use
+#  Probably should change to look at opt, not opt_func, and add code to OptimWrapper to make a nice string?
+
+from fastai.torch_core import AdamW
+from .ranger import Ranger
+
+setattr(AdamW, "tracker_description", "AdamW")
+setattr(Ranger, "tracker_description", "Ranger")

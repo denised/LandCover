@@ -16,11 +16,12 @@
 #changes 8/31/19 - fix references to *self*.N_sma_threshold; 
                 #changed eps to 1e-5 as better default than 1e-8.
 
+# pylint: disable=no-member
+# (torch does things that confuse pylint)
+
 import math
 import torch
-from torch.optim.optimizer import Optimizer, required
-import itertools as it
-
+from torch.optim.optimizer import Optimizer   # pylint: disable=no-name-in-module
 
 
 class Ranger(Optimizer):
