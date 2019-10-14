@@ -6,6 +6,7 @@ from fastai.basics import *
 from fastai import vision
 from multispectral import windows
 from multispectral import corine
+from multispectral import bands
 from infra import *
 
 """Models for working with Landsat / Corine data"""
@@ -117,6 +118,39 @@ class MultiUResNet(LearnerPlus):
 
         genfn = lambda _, arch=arch : cls.create_resnet(arch)
         learner = vision.unet_learner(databunch, genfn, pretrained=False, **l_args)
+        learner.__class__ = cls
+        learner.init_tracking(arch=arch_description)  # pylint: disable=no-member
+        return learner
+
+
+class MultiResClassifier(MultiUResNet):
+    """Build the same way we build a MultiUResNet, but build a classifier instead.  So no UNet, and 
+    change the target to be multi-label classification (presence or absence of each of the land use types)"""
+
+    @classmethod
+    def create_resnet(cls, arch='resnet18'):
+        (block, layers) = cls.standard_arches[arch]
+        model = ResNet(block, layers, num_classes=len(bands.CORINE_BANDS)-1)   # <-- Add num_classes here.
+        model.conv1 = nn.Conv2d(6, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        return model
+    
+    @classmethod 
+    def create_dataset(cls, input_data):
+        return windows.WindowedDataset(input_data, corine.corine_classifier, *corine.corine_attributes())
+    
+    @classmethod
+    def create(cls, tr_data, val_data, arch='resnet18', bs=None, **kwargs):
+        l_args, d_args = cls._init_args(**kwargs)
+
+        bs = ifnone(bs, defaults.batch_size)
+        tr_ds = cls.create_dataset(tr_data)
+        val_ds = cls.create_dataset(val_data)
+        databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **d_args)
+        arch_description = f"{cls.__name__} arch={arch}"
+
+        model = cls.create_resnet(arch)
+        
+        learner = Learner(databunch, model, **l_args)
         learner.__class__ = cls
         learner.init_tracking(arch=arch_description)  # pylint: disable=no-member
         return learner

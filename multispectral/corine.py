@@ -94,6 +94,12 @@ def corine_labeler(lsdat:rasterio.io.DatasetReader, region:windows.Window):
     return (ls_data.astype(np.dtype('float32'))/255, c_data.astype(np.dtype('float32'))/255)
 
 
+def corine_classifier(lsdat:rasterio.io.DatasetReader, region:windows.Window):
+    """Output a multilabel classification (presence or absence of every land use type except NODATA)"""
+    (x, y) = corine_labeler(lsdat, region)
+    return x, (y[1:].sum((1,2))>0).astype(np.dtype('float32'))
+
+
 def corine_attributes():
     """Return the c and classes attributes required by fastai"""
     cs = bands.CORINE_BANDS
@@ -115,7 +121,7 @@ def fetch_corine(crs) -> rasterio.io.DatasetReader:
         corine = _corine_open_datasets[epsg]
         # check that it is still open
         if corine.closed:
-            del(_corine_open_datasets[epsg])
+            del _corine_open_datasets[epsg]
             # fall through
         else:
             return corine

@@ -55,7 +55,7 @@ finally:
         # do whatever the right technique is for the platform(s) you run on.
         #os.system("sudo shutdown now")
         myname = platform.node()
-        os.system(f"paperspace machine {myname} stop")
+        os.system(f"paperspace machines stop --machineId {myname}")
         
     
 
