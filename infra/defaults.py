@@ -15,6 +15,7 @@ def set_defaults(**overrides):
             metrics = [],
             model_directory = 'models',
             callback_fns = [],
+            corine_directory = "Corine Directory must be set",
             class_index = 1,       # The index of a batch that represents class.  (Usually 1 or -1)
             train_end = None,      # If using TrainEnd callback, how many iterations to run before terminating
             trace_pdb = False,     # if using LearnerTracer callback and a trace event occurs, drop into the debugger

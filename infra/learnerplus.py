@@ -5,7 +5,7 @@ from matplotlib import pyplot
 import torch
 import fastai
 from fastai.basic_train import *
-from fastai.callback import Callback
+from fastai.callback import Callback, AverageMetric
 from fastai.basic_data import DataBunch, DeviceDataLoader
 from torch.utils.data.dataloader import DataLoader
 from fastai.core import defaults, ifnone
@@ -230,6 +230,7 @@ class CycleHandler(Callback):
         """Propagate the named event to all our managed callbacks, and collect the responses"""
         # Why does CallbackHandler overload __call__ to do this?  So much clearer as a named function
         delta = {}
+        cbstate['cyclehandler'] = True  # make it possible for the callback to tell if it is within cycle or not
         for c in self.callbacks:
             result = getattr(c, event_name)(**cbstate)  # call the appropriate event
             if result:

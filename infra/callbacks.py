@@ -137,7 +137,7 @@ class TrainLoss(object):
     
     def __call__(self, prediction, target):
         prediction2 = self.activation(prediction) if self.activation else prediction
-        target2 = self.epsilon(target) if self.epsilon else target
+        target2 = self.epsilon(target) if self.epsilon else target.float()
         return self.loss_fn(prediction2, target2)
 
 
@@ -147,8 +147,9 @@ class LossMetric(Callback):
     but not for evaluating entire history.  Use a custom callback or AverageMetric for other behaviors.
     """
     _order = -10
+
     def __init__(self, fn, name, activation=torch.sigmoid, epsilon=None):
-        super().__init__(self)
+        super().__init__()
         self.loss_fn = fn
         self.name = name
         self.activation = activation
@@ -160,17 +161,20 @@ class LossMetric(Callback):
             assert epsilon is None
             self.epsilon = None
     
-    def on_train_begin(self, metrics_names, **kwargs):
-        return { 'metrics_names': metrics_names + [ self.name ] }
+    def on_train_begin(self, **kwargs):
+        if 'cyclehandler' in kwargs:
+            return { 'metrics_names': kwargs.get('metrics_names',{}) + [ self.name ] }
     
-    def on_epoch_end(self, last_output, last_target, last_metrics, **kwargs):
+    def on_epoch_end(self, last_output, last_target, **kwargs):
         prediction = last_output.detach()
         prediction2 = self.activation(prediction) if self.activation else prediction
         target = last_target.detach()
-        target2 = self.epsilon(target) if self.epsilon else target
+        target2 = self.epsilon(target) if self.epsilon else target.float()
         result = self.loss_fn(prediction2, target2)
-        last_metrics.append(result)
-        return { 'last_metrics': last_metrics }
+        return { 'last_metrics': kwargs.get('last_metrics',{}) + [ result ] }
+    
+    def __str__(self):
+        return self.name
 
 
 #############################################################################################################
@@ -183,31 +187,39 @@ class GradientMetrics(LearnerCallback):
     """Report gradient magnitude means.  Gives a very rough estimate of how much the model is changing.
     Gradients are sampled once per epoch (not accumulated over the epoch)."""
     _order = -10
-    def on_train_begin(self, metrics_names, **kwargs):
+    def on_train_begin(self, **kwargs):
         self.sample = None
-        return { 'metrics_names' : metrics_names +  ["min GMM", "mean GMM", "max GMM"] }
+        self.names =  ["min GMM", "mean GMM", "max GMM"]
+        if 'cyclehandler' in kwargs:
+            return { 'metrics_names' : kwargs.get('metrics_names', {}) +  self.names }
+        else:
+            self.learn.recorder.add_metric_names(self.names)
     
     def on_backward_end(self, **kwargs):
         if self.sample is None:
             gmms = torch.stack([ p.grad.abs().mean() for p in self.learn.model.parameters() if p.grad is not None ])
             self.sample = [ gmms.min().item(), gmms.mean().item(), gmms.max().item() ]
     
-    def on_epoch_end(self, last_metrics, **kwargs):
-        last_metrics = last_metrics + self.sample
+    def on_epoch_end(self, **kwargs):
+        # it's possible that epoch end get's called before a sample has happened (?)
+        last_metrics =  kwargs.get('last_metrics', {}) + (self.sample or [0.0] * 3)
         self.sample = None
         return { 'last_metrics': last_metrics }
 
 
-class LearnedClassesMetric(Callback):
+class LearnedClassesMetric(LearnerCallback):
     "Report the mean proportions of classes learned."
     _order = -10
-    def __init__(self, classnames = None, activation=torch.sigmoid):
-        super().__init__()
+    def __init__(self, learn, classnames = None, activation=torch.sigmoid):
+        super().__init__(learn)
         self.classnames = classnames or defaults.classnames
         self.activation = activation
 
-    def on_train_begin(self, metrics_names, **kwargs):
-        return { 'metrics_names' : metrics_names + self.classnames }
+    def on_train_begin(self, **kwargs):
+        if 'cyclehandler' in kwargs:
+            return { 'metrics_names' : kwargs.get('metrics_names',{}) + self.classnames }
+        else:
+            self.learn.recorder.add_metric(self.classnames)
     
     def on_epoch_begin(self, **kwargs):
         self.stats = []
@@ -217,20 +229,22 @@ class LearnedClassesMetric(Callback):
         if self.activation: last_output = self.activation(last_output)
         self.stats.append( class_weights(last_output) )
     
-    def on_epoch_end(self, last_metrics, **kwargs):
+    def on_epoch_end(self, **kwargs):
         cumstats = torch.stack(self.stats).mean((0,))
-        return { 'last_metrics': last_metrics + cumstats.tolist() }
+        return { 'last_metrics': kwargs.get('last_metrics',{}) + cumstats.tolist() }
 
 
-class DiceMetric(Callback):
+class DiceMetric(LearnerCallback):
     """Report the dice index.  (larger is better)"""
     _order = -10
-    def __init__(self, activation=torch.sigmoid, weighted=False):
+    def __init__(self, learn, activation=torch.sigmoid, weighted=False):
         self.activation = activation
         self.weighted = weighted
+        self.name = 'wdice' if self.weighted else 'dice'
     
-    def on_train_begin(self, metrics_names, **kwargs):
-        return { 'metrics_names' : metrics_names + ['WDice' if self.weighted else 'Dice' ]}
+    def on_train_begin(self, **kwargs):
+        if 'cyclehandler' in kwargs:
+            return { 'metrics_names' : kwargs.get('metrics_names', {}) + [ self.name ]}
     
     def on_epoch_begin(self, **kwargs):
         self.samples = []
@@ -243,8 +257,8 @@ class DiceMetric(Callback):
         else:
             self.samples.append( dice(last_output, last_target))
     
-    def on_epoch_end(self, last_metrics, **kwargs):
-        return { 'last_metrics' : last_metrics + [ torch.stack(self.samples).mean().item() ]}
+    def on_epoch_end(self, **kwargs):
+        return { 'last_metrics' : kwargs.get('last_metrics', {}) + [ torch.stack(self.samples).mean().item() ]}
 
 #############################################################################################################
 #

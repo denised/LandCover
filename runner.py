@@ -4,7 +4,6 @@ import datetime
 import platform
 from fastai import *
 from fastai.basics import *
-from multispectral import corine
 from multispectral import windows
 import neptune
 import infra
@@ -14,14 +13,16 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--shutdown", help="Shutdown computer when complete", action='store_true')
 parser.add_argument("--description", help="Description of run", default="runner.py")
 parser.add_argument("--epochs", type=int, help="How many full epochs to run (default 1)", default=1)
-parser.add_argument("--save", type=bool, help="Save resulting model(s)", action='store_true' )
+parser.add_argument("--save", help="Save resulting model(s)", action='store_true' )
 parser.add_argument("--cpu", help="Run on cpu", action='store_true')
 args = parser.parse_args()
 
-corine.set_corine_directory(os.environ['CORINE_DIR'])
 windows_list = os.environ['LANDSAT_DIR'] + '/all_windows.csv'
 neptune.init('denised/landcover')
-infra.set_defaults(traintracker_store=infra.TrainTrackerWebHook(os.environ['TRAINTRACKER_URI']))
+infra.set_defaults(
+    corine_directory=os.environ['CORINE_DIR'],
+    traintracker_store=infra.TrainTrackerWebHook(os.environ['TRAINTRACKER_URI'])
+    )
 
 wl = list(windows.from_file(windows_list))
 (tr_list, val_list) = windows.chunked_split(wl,512)
@@ -38,7 +39,7 @@ logfilename = "runnerlog_{:%y%m%d_%H%M%S}.csv".format(datetime.datetime.now())
 
 def run_one():
     monitor=infra.CycleHandler.create(n=80, callbacks=[
-        infra.DiceMetric(), infra.GradientMetrics, infra.LearnedClassesMetric(),
+        infra.DiceMetric, infra.GradientMetrics, infra.LearnedClassesMetric,
         infra.CSVLogger(logfilename,'a'), infra.SendToNeptune])
          
     learner = zoo.MultiUResNet.create(tr_list, val_list, callbacks=[], callback_fns=[monitor])

@@ -5,6 +5,7 @@ from pathlib import Path
 from . import coords
 from . import bands
 from pathlib import Path
+from fastai.basics import defaults
    
 def bi(srcname,band):
     # syntactic sugar to make the code more readable
@@ -97,7 +98,7 @@ def corine_labeler(lsdat:rasterio.io.DatasetReader, region:windows.Window):
 def corine_classifier(lsdat:rasterio.io.DatasetReader, region:windows.Window):
     """Output a multilabel classification (presence or absence of every land use type except NODATA)"""
     (x, y) = corine_labeler(lsdat, region)
-    return x, (y[1:].sum((1,2))>0).astype(np.dtype('float32'))
+    return x, (y[1:].sum((1,2))>0)
 
 
 def corine_attributes():
@@ -105,13 +106,8 @@ def corine_attributes():
     cs = bands.CORINE_BANDS
     return (len(cs), cs)
 
-#The directory where we keep the the UTM projected corine dataset
-_corine_directory = Path("/storage/data/corine")
-_corine_open_datasets = {}
 
-def set_corine_directory(p):
-    global _corine_directory
-    _corine_directory = Path(p)
+_corine_open_datasets = {}
 
 def fetch_corine(crs) -> rasterio.io.DatasetReader:
     """Return a rasterio dataset for Corine reprojected into the specified crs."""
@@ -127,7 +123,7 @@ def fetch_corine(crs) -> rasterio.io.DatasetReader:
             return corine
 
     # Do we  have a saved reprojection?
-    corine_name = _corine_directory / ("corine_" + epsg + ".tif")
+    corine_name = Path(defaults.corine_directory) / ("corine_" + epsg + ".tif")
     if not corine_name.exists():
         raise Exception('Corine projection {} not found!'.format(epsg)) 
     
