@@ -142,24 +142,17 @@ class TrainLoss(object):
 
 
 class LossMetric(Callback):
-    """Wrapper around a function to apply activation and or epsilon shrinking of target.  Use for a metric/callback.
+    """Wrapper around a function to apply activation if needed.  Use for a metric/callback.
     LossMetric is applied to the last batch of an epoch only, so is suitable for sampling overall trends,
     but not for evaluating entire history.  Use a custom callback or AverageMetric for other behaviors.
     """
     _order = -10
 
-    def __init__(self, fn, name, activation=torch.sigmoid, epsilon=None):
+    def __init__(self, fn, name, activation=torch.sigmoid):
         super().__init__()
         self.loss_fn = fn
         self.name = name
         self.activation = activation
-        if callable(epsilon):
-            self.epsilon = epsilon
-        elif isinstance(epsilon, float):
-            self.epsilon = lambda t, e=epsilon: e + (t * (1-2*e))   # TODO: inplace version?, e.g. torch.add_
-        else:
-            assert epsilon is None
-            self.epsilon = None
     
     def on_train_begin(self, **kwargs):
         if 'cyclehandler' in kwargs:
@@ -168,9 +161,7 @@ class LossMetric(Callback):
     def on_epoch_end(self, last_output, last_target, **kwargs):
         prediction = last_output.detach()
         prediction2 = self.activation(prediction) if self.activation else prediction
-        target = last_target.detach()
-        target2 = self.epsilon(target) if self.epsilon else target.float()
-        result = self.loss_fn(prediction2, target2)
+        result = self.loss_fn(prediction2, last_target)
         return { 'last_metrics': kwargs.get('last_metrics',{}) + [ result ] }
     
     def __str__(self):

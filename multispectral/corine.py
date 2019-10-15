@@ -98,7 +98,7 @@ def corine_labeler(lsdat:rasterio.io.DatasetReader, region:windows.Window):
 def corine_classifier(lsdat:rasterio.io.DatasetReader, region:windows.Window):
     """Output a multilabel classification (presence or absence of every land use type except NODATA)"""
     (x, y) = corine_labeler(lsdat, region)
-    return x, (y[1:].sum((1,2))>0)
+    return x, (y[1:].sum((1,2))>0).astype(np.dtype('float32'))
 
 
 def corine_attributes():
