@@ -15,6 +15,7 @@ parser.add_argument("--description", help="Description of run", default="runner.
 parser.add_argument("--epochs", type=int, help="How many full epochs to run (default 1)", default=1)
 parser.add_argument("--save", help="Save resulting model(s)", action='store_true' )
 parser.add_argument("--cpu", help="Run on cpu", action='store_true')
+parser.add_argument("--test_run", help="Run with a minimal dataset size to verify code works", action='store_true')
 args = parser.parse_args()
 
 windows_list = os.environ['LANDSAT_DIR'] + '/all_windows.csv'
@@ -26,7 +27,9 @@ infra.set_defaults(
 
 wl = list(windows.from_file(windows_list))
 (tr_list, val_list) = windows.chunked_split(wl,512)
-#tr_list = tr_list[:10000]
+if args.test_run:
+    tr_list = tr_list[:200]
+    val_list = val_list[:20]
 
 #ender = infra.TrainEnder()
 #infra.set_defaults(train_end=4)
@@ -38,9 +41,15 @@ if args.cpu:
 logfilename = "runnerlog_{:%y%m%d_%H%M%S}.csv".format(datetime.datetime.now())
 
 def run_one():
-    monitor=infra.CycleHandler.create(n=80, callbacks=[
-        infra.DiceMetric, infra.GradientMetrics, infra.LearnedClassesMetric,
-        infra.CSVLogger(logfilename,'a'), infra.SendToNeptune])
+    monitor_frequency = 80
+    if args.test_run:
+        monitor_frequency = 20
+    monitor=infra.CycleHandler.create(n=monitor_frequency, callbacks=[
+        infra.DiceMetric, 
+        infra.GradientMetrics, 
+        infra.LearnedClassesMetric,
+        infra.CSVLogger(logfilename,'a'), 
+        infra.SendToNeptune])
          
     learner = zoo.MultiUResNet.create(tr_list, val_list, callbacks=[], callback_fns=[monitor])
     learner.fit(args.epochs, description=args.description)   # pylint: disable=unexpected-keyword-arg
