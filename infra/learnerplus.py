@@ -179,7 +179,7 @@ class DummyDataBunch(DataBunch):
         return "DummyDataBunch()"
 
 
-class CycleHandler(Callback):
+class CycleHandler(LearnerCallback):
     """The cycle handler manages a set of other callbacks on a cycle of length n.
     That is, to the callbacks and metrics that are being managed, it appears that the epoch length is n, all the while the top-level CallbackHandler
     is going through the true epoch.  As much as possible, callbacks can be used interchangeably between CallbackHandler and CycleHandler,
@@ -193,17 +193,19 @@ class CycleHandler(Callback):
     * CycleHandler treats callbacks and metrics the same, and the order in which they are supplied is the order in which they will be called.
     * Starting training at a particular epoch is not supported (since the outer callback handler and the cycles don't have a common definition of what
     an epoch _is_)
-    * Having multiple CycleHandler's (including with different values of n) is possible; they will operate completely independently of each other."""
+    * Having multiple CycleHandler's (including with different values of n) is possible; they will operate completely independently of each other.
+    * CallbackHandler by default only operates during training; set the on_eval argument to True to have it operate during the main-level validation
+      as well."""
 
     @classmethod
-    def create(cls, n, callbacks):
+    def create(cls, n, callbacks, on_eval=False):
         """Partially initialize a CycleHandler.  Returns a function that will create the actual callback on demand, allowing late binding of
         the learner.  Use this by passing the result to the `callback_fns` argument of Learner like this:
             ch = CycleHandler.create(200, [__list of callbacks__])
             mylearner = Learner(..., callback_fns=[ch])"""
-        return partial(cls, n=n, callbacks=callbacks)
+        return partial(cls, n=n, callbacks=callbacks, on_eval=on_eval)
 
-    def __init__(self, learner, n, callbacks):
+    def __init__(self, learner, n, callbacks, on_eval=False):
         """Initialize the cyclehandler for a cycle length of n batches.  Callbacks must be an array, each element of which may be one
         of following three things:
             * a callback object
@@ -211,8 +213,9 @@ class CycleHandler(Callback):
             * a function.  Functions are assumed to compute a metric over a batch, and are automatically wrapped in AverageMetric to return the average of
             that function over all batches in the cycle.
         Collectively this covers the cases supported via various features of Learner and CallbackHandler"""
-        super().__init__()
+        super().__init__(learner)
         self.n = n
+        self.on_eval = on_eval
         self.count = 0
         self.callbacks = []
         for c in callbacks:
@@ -266,16 +269,18 @@ class CycleHandler(Callback):
         # What's going on here: we begin an epoch if we are on the cycle boundary and we always begin a batch.
         # We need to accumulate delta from both operations, and we need to update cbstate in between them.
         #log_it(self, 'on_batch_begin', **cbstate)
-        delta = {}
-        if self.count % self.n == 0:
-            delta.update( self._propagate('on_epoch_begin', **cbstate) ) 
-            cbstate.update(delta)
-        delta.update( self._propagate('on_batch_begin', **cbstate) )
-        self.count += 1
-        return self._return(delta)
+        if cbstate['train'] or self.on_eval:
+            delta = {}
+            if self.count % self.n == 0:
+                delta.update( self._propagate('on_epoch_begin', **cbstate) ) 
+                cbstate.update(delta)
+            delta.update( self._propagate('on_batch_begin', **cbstate) )
+            self.count += 1
+            return self._return(delta)
     
     def on_loss_begin(self, **cbstate):
-        return self._return(self._propagate('on_loss_begin', **cbstate))
+        if cbstate['train'] or self.on_eval:
+            return self._return(self._propagate('on_loss_begin', **cbstate))
     
     def on_backward_begin(self, **cbstate):
         return self._return(self._propagate('on_backward_begin', **cbstate))
@@ -289,12 +294,13 @@ class CycleHandler(Callback):
     def on_batch_end(self, **cbstate):          # ***
         #log_it(self, 'on_batch_end', **cbstate)
         # Always do a batch_end, and if this is the end of a cycle also do an epoch_end
-        delta = self._propagate('on_batch_end', **cbstate)
-        if self.count % self.n == 0:
-            cbstate.update(delta)
-            cbstate['last_metrics'] = []
-            delta.update( self._propagate('on_epoch_end', **cbstate) )
-        return self._return(delta)
+        if cbstate['train'] or self.on_eval:
+            delta = self._propagate('on_batch_end', **cbstate)
+            if self.count % self.n == 0:
+                cbstate.update(delta)
+                cbstate['last_metrics'] = []
+                delta.update( self._propagate('on_epoch_end', **cbstate) )
+            return self._return(delta)
     
     def on_epoch_end(self, **cbstate):          # ***
         #log_it(self, 'on_epoch_end', **cbstate)
