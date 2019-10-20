@@ -10,18 +10,12 @@ trained model on just the RGB portion of the landsat data--looking at both the f
 Assuming the first phase is successful, a second phase will be to use the model used in phase 1 as a transfer model in a new ML 
 problem and see how well it adapts.
 
-The code in this repo has several parts:
-* landsat5fetch: Code to script download of landsat tiles from the USGS directly.
-* corine: (Some of the) code used to modify the corine dataset so that it is comparable to the landsat data
-* multispectral: tools for managing multispectral data, and in particular for managing very large data multispectral 
-data sets (e.g. landsat tiles)
-
 To manage the large data sizes, I'm using a windowing technique to extract smaller 256x256 windows of data from the landsat tiles.
 The inputs and targets for the ML process are matching windows from the landsat and corine data, respectively.
 Currently this is done in a very efficient way, taking advantage of tiled tif storage, and maintaining order of windows in the dataset.
 But it may also be interesting to try different window sizes, locations, orientations, etc.
 
-Some other interesting / unusual bits:
+Some interesting / unusual bits:
 
 * The data we have may have non-overlapping extents.  That is we have landsat data that doesn't correspond to any region covered by
 corine, and vice versa.  So when actually generating the x,y pairs, we intersect them and propagate a 'NODATA' value both ways.
@@ -37,30 +31,40 @@ advantage of seeing the extent-behavior of ocean.  (This also uses the multi-hot
 Technology: fastai (https://fast.ai), pytorch and GDAL/rasterio
 
 TODO: add references to the landsat and corine data<br>
-TODO: add a 'get started' notebook<br>
 TODO: create public store for our version of the corine dataset, and other artifacts.
 
-# Using this Code - Setup
+# What is in this Repo
 
-There are several environment variables that may need to be set for this code to function properly.  The code snippet below
-specifies them in bash format:
+The code in this repo is organized into several parts:
+* landsat5fetch: Code to script download of landsat tiles from the USGS directly.
+* corine: (Some of the) code used to modify the corine dataset so that it is comparable to the landsat data
+* multispectral: tools for managing multispectral data, and in particular for managing very large data multispectral 
+data sets (e.g. landsat tiles)
+* infra (short for infrastructure):  Additions to fastai that I have found to make life easier.  Some of these are pretty
+significant and may be of interest on their own:
+    * CycleHandler: a fastai Callback that makes it possible to run callbacks on a fixed cycle of less than an epoch.
+    It is intended to be used primarily to get more frequent metrics reporting.
+    * TrainTracker: yet another way to keep track of experiments you have run.  The way I have it set up, it logs runs
+    to a Google spreadhsheet, which is a particularly light-weight and simple.  Of particular interest: it watermarks
+    models with an ID, so that you can keep track of the _sequence_ of training events that produced a particular model.
 
-````bash
-# If you want to use the landsat fetch code, you need to create an account with USGS (which you can obtain via the registration
-# button at https://earthexplorer.usgs.gov).  The code will look for your username and password here:
-export USGS_USER=your_user_name
-export USGS_PASSWORD=your_password
 
-# If you want to use neptune.ml for experiment monitoring and reporting, you will need an account with them
-# and a API token, set here
-export NEPTUNE_API_TOKEN=your_long_api_key
-````
+# Using this Code
+## Setup
 
-Use the function `multispectral.corine.set_corine_directory(`_d_`)` to tell the corine code where to find the corine dataset.
+The setup directory contains shell scripts that I use to set up an Ubuntu 16.04 VM.  I don't claim that these will work for everyone, but
+at least it covers all the steps.  The environment.yml file, in particular, specifies the complete conda environment.
 
-Finally, this code also builds on the fastai `default` feature.  The default values used and defined in this code can be found
-in the file `infra.py`.  (See examples in the top-level notebooks of overriding these values.)
+There are some environment variables that I use to specify some configuration: these are described in the setup/Readme.txt file.
 
-# Using this Code - Jupyter Notebooks
+## Getting the Data
 
 _TODO_
+
+## Jupyter Notebooks
+
+Start with the notebook StartHere.ipynb :-)
+The file ./runner.py is a python script that also has all the setup required to run learn.fit with this code.  I use it by making a copy and
+customizing the setup and calls to what I want to do in my next experiment.
+
+In the landsatfetch directory is another notebook that walks you through the steps to download data from USGS and process it into the right format.

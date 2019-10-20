@@ -1,0 +1,25 @@
+name: multispectral
+# fastai + gdal + other things we like
+channels:
+  - fastai
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - pip
+  - nodejs   # needed to enable jupyter extensions
+  - jupyter
+  - jupyter_contrib_nbextensions
+  - ipywidgets
+  - pylint
+  - psutil
+  - gdal
+  - pyproj
+  - numpy
+  - pandas
+  - matplotlib
+  - rasterio
+  - fastai=1.0.54
+  - pytorch=1.1.0
+  - pip:
+    - neptune-client
