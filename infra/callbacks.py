@@ -96,7 +96,7 @@ class CSVLogger(Callback):
     
     def on_epoch_end(self, iteration, last_loss, last_metrics, **kwargs):
         stats = [str(stat) if isinstance(stat, int) else '##' if stat is None else f'{stat:.6f}'
-                 for stat in [iteration, last_loss] + last_metrics]
+                 for stat in [iteration, last_loss]+last_metrics ]
         self.file.write(','.join(stats) + '\n')
     
     def on_train_end(self, **kwargs):
