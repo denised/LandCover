@@ -7,9 +7,6 @@ from pathlib import Path
 
 # pylint: disable=arguments-differ
 
-# Some of these callbacks are meant to be used with CycleHandler.  Specifically, the way that metrics add themselves to the list of
-# metrics is correct with CycleHandler, but not with Recorder
-
 class Validate(LearnerCallback):
     """Run validation on demand, potentially with a list of callbacks.  The callbacks would most likely be used to do test time augmentation (TTA)."""
 

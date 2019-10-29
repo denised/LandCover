@@ -154,3 +154,21 @@ class MultiResClassifier(MultiUResNet):
         learner.__class__ = cls
         learner.init_tracking(arch=arch_description)  # pylint: disable=no-member
         return learner
+
+# does not include nodata.. todo: add.
+class_counts = [507, 339, 783, 600, 145, 799, 811, 609, 544, 358]
+# weights calculated as follows:
+# class_median = (max(class_counts) + min(class_counts)) / 2
+# class_weights = class_median / class_counts
+class_weights = torch.tensor( [0.942801, 1.410029, 0.610473, 0.796667, 3.296552, 0.598248, 0.589396, 0.784893, 0.878676, 1.335196] )
+
+def weighted_mse(x,y):
+    """weighted MSE.  We don't use the builtin one because it applies weights to the *samples*, where we need weights on the *classes*"""
+    global class_weights
+    class_weights = class_weights.to( x.device )
+    # separate assignments is nice for debugging
+    er = (x - y)
+    er2 = (er * er).mean((0,))
+    wer2 = class_weights * er2
+    return wer2.sum()
+    

@@ -5,6 +5,7 @@ import platform
 from fastai import *
 from fastai.basics import *
 from multispectral import windows
+from multispectral import tools
 import neptune
 import infra
 import zoo
@@ -19,7 +20,7 @@ parser.add_argument("--test_run", help="Run with a minimal dataset size to verif
 args = parser.parse_args()
 
 windows_list = os.environ['LANDSAT_DIR'] + '/all_windows.csv'
-neptune.init('denised/landcover')
+neptune_project = neptune.init('denised/landcover')
 infra.set_defaults(
     corine_directory=os.environ['CORINE_DIR'],
     traintracker_store=infra.TrainTrackerWebHook(os.environ['TRAINTRACKER_URI'])
@@ -37,10 +38,30 @@ infra.set_defaults(bs=4,silent=True)
 if args.cpu:
     infra.set_defaults(device=torch.device('cpu'))
 
-# TODO: I'd like to put a tracker id in here somewhere but it isn't exposed until after the callback has already been created
 logfilename = "runnerlog_{:%y%m%d_%H%M%S}.csv".format(datetime.datetime.now())
 
-def run_one():
+model_dir = Path(infra.defaults.model_directory)
+def idname(learner):
+    """Get the tracker id of the learner in a form suitable for use in a file name (i.e. remove the trailing space(s))"""
+    return learner.parameters['train_id'].rstrip()
+
+def save_sample(learner,data):
+    """Save a little bit of data with predictions and targets, so we can explore without reloading"""
+    predset = tools.get_prediction_set(learner,data)
+    # convert tensors to numpy
+    predset = ( x.numpy() if isinstance(x,torch.Tensor) else x for x in predset )
+    filename = model_dir / (idname(learner) + "_sample.pkl")
+    pickle.dump( predset, filename )
+    # Also upload to neptune, if we seem to be using it
+    if infra.last_neptune_exp_id:
+        # TODO
+        pass
+
+
+def run_one(description=None, epochs=None, starting_from=None):
+    description = description if description is not None else args.description
+    epochs = epochs or args.epochs
+
     monitor_frequency = 80
     if args.test_run:
         monitor_frequency = 20
@@ -52,11 +73,19 @@ def run_one():
         infra.SendToNeptune])
          
     learner = zoo.MultiUResNet.create(tr_list, val_list, callbacks=[], callback_fns=[monitor])
-    learner.fit(args.epochs, description=args.description)   # pylint: disable=unexpected-keyword-arg
+    if starting_from: # begin with existing weights
+        learner.model.load_state_dict(torch.load(model_dir/starting_from))
     
+    learner.fit(epochs, description=description)   # pylint: disable=unexpected-keyword-arg
+
+    # save the model
     if args.save:
-        name = Path(infra.defaults.model_directory) / (learner.parameters["train_id"] + ".pth")    # pylint: disable=no-member
+        name = model_dir / (idname(learner) + ".pth")
         torch.save(learner.model.state_dict(), name)
+
+    # save a sample to look at.
+    save_sample(learner, tr_list[:40])
+
     
 try:
     run_one()

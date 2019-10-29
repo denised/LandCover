@@ -59,6 +59,16 @@ class LearnerPlus(Learner):
             res.set_data(tr_data, val_data)
         return res
 
+    # ##############################  Save / Load weights
+    # Save / load model weights only.  Allows for "loose" transfer of weights between different models
+    def save_model_weights(self, path):
+        torch.save(self.model.state_dict(), path)
+    
+    def load_model_weights(self, path, strict=False):
+        with self.pause_training():
+            state = torch.load(path, map_location=self.device())
+            self.model.load_state_dict(state, strict)
+    
     # ##############################  Initialization
     # Note we don't have an __init__ method.  We don't use it.  Instead each subclass is expected to define a @classmethod create method that creates
     # a learner object, together with it's data.  See the classes in zoo.py for examples.
@@ -178,7 +188,17 @@ class LearnerPlus(Learner):
         self.model.eval()
         yield True
         self.model.train(stashed_train_state)
- 
+
+    # ################################  Misc
+    
+    def device(self):
+        """Return the device this learner's buffers are on.  (Assumes they are all on the same device...)"""
+        # OK, I lied.  The first buffer is (or may be) a traintracker buffer, which is on the CPU.
+        # Grab the one after that instead.
+        # TODO: is there a way to make this more principled?
+        bfs = self.model.buffers()
+        skip = next(bfs)
+        return next(bfs).device
 
 
 class DummyDataBunch(DataBunch):
