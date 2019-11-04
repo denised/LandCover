@@ -52,10 +52,6 @@ def save_sample(learner,data):
     predset = ( x.numpy() if isinstance(x,torch.Tensor) else x for x in predset )
     filename = model_dir / (idname(learner) + "_sample.pkl")
     pickle.dump( predset, filename )
-    # Also upload to neptune, if we seem to be using it
-    if infra.last_neptune_exp_id:
-        # TODO
-        pass
 
 
 def run_one(description=None, epochs=None, starting_from=None):
@@ -84,8 +80,7 @@ def run_one(description=None, epochs=None, starting_from=None):
         torch.save(learner.model.state_dict(), name)
 
     # save a sample to look at.
-    save_sample(learner, tr_list[:40])
-
+    #save_sample(learner, tr_list[:40])
     
 try:
     run_one()

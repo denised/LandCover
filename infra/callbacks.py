@@ -121,8 +121,9 @@ class CSVLogger(Callback):
 
 class TrainLoss(object):
     """Wrapper around a loss function to apply activation and/or epsilon shrinking of target.  Use as loss_func in training."""
-    def __init__(self, fn, activation=torch.sigmoid, epsilon=None):
+    def __init__(self, fn, name, activation=torch.sigmoid, epsilon=None):
         self.loss_fn = fn
+        self.name = name
         self.activation = activation
         if callable(epsilon):
             self.epsilon = epsilon
@@ -140,7 +141,7 @@ class TrainLoss(object):
 
 class LossMetric(Callback):
     """Wrapper around a function to apply activation if needed.  Use for a metric/callback.
-    LossMetric is applied to the last batch of an epoch only, so is suitable for sampling overall trends,
+    LossMetric is applied to the last batch of an epoch only, so is suitable for sampling trends,
     but not for evaluating entire history.  Use a custom callback or AverageMetric for other behaviors.
     """
     _order = -10

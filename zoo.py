@@ -130,7 +130,7 @@ class MultiResClassifier(MultiUResNet):
     @classmethod
     def create_resnet(cls, arch='resnet18'):
         (block, layers) = cls.standard_arches[arch]
-        model = ResNet(block, layers, num_classes=len(bands.CORINE_BANDS)-1)   # <-- Add num_classes here.
+        model = ResNet(block, layers, num_classes=len(bands.CORINE_BANDS))   # <-- Add num_classes here.
         model.conv1 = nn.Conv2d(6, 64, kernel_size=7, stride=2, padding=3, bias=False)
         return model
     
@@ -155,18 +155,20 @@ class MultiResClassifier(MultiUResNet):
         learner.init_tracking(arch=arch_description)  # pylint: disable=no-member
         return learner
 
-# does not include nodata.. todo: add.
+# does not include mask bit.. todo: add.
 class_counts = [507, 339, 783, 600, 145, 799, 811, 609, 544, 358]
 # weights calculated as follows:
 # class_median = (max(class_counts) + min(class_counts)) / 2
 # class_weights = class_median / class_counts
-class_weights = torch.tensor( [0.942801, 1.410029, 0.610473, 0.796667, 3.296552, 0.598248, 0.589396, 0.784893, 0.878676, 1.335196] )
+# plus added 0.25 for the mask bit just arbitrarily.
+class_weights = torch.tensor( [0.25, 0.942801, 1.410029, 0.610473, 0.796667, 3.296552, 0.598248, 0.589396, 0.784893, 0.878676, 1.335196] )  # pylint: disable=not-callable
+#                              mask   water     barren    grass     shrub     wetlands   farm     forest    urban     cloud     shadow
 
 def weighted_mse(x,y):
     """weighted MSE.  We don't use the builtin one because it applies weights to the *samples*, where we need weights on the *classes*"""
     global class_weights
     class_weights = class_weights.to( x.device )
-    # separate assignments is nice for debugging
+    # separate assignments are easier to debug
     er = (x - y)
     er2 = (er * er).mean((0,))
     wer2 = class_weights * er2
