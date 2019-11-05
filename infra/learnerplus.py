@@ -197,7 +197,7 @@ class LearnerPlus(Learner):
         # Grab the one after that instead.
         # TODO: is there a way to make this more principled?
         bfs = self.model.buffers()
-        skip = next(bfs)
+        skip = next(bfs)   # pylint: disable=unused-variable
         return next(bfs).device
 
 

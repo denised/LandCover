@@ -223,6 +223,35 @@ class LearnedClassesMetric(LearnerCallback):
         return { 'last_metrics': kwargs.get('last_metrics',{}) + cumstats.tolist() }
 
 
+class ClassAccuracyMetric(LearnerCallback):
+    """Report per-class accuracy"""
+    _order = -10
+    def __init__(self, learn, classnames = None, activation=torch.sigmoid):
+        super().__init__(learn)
+        self.classnames = classnames or defaults.classnames
+        self.activation = activation
+
+    def on_train_begin(self, **kwargs):
+        if 'cyclehandler' in kwargs:
+            return { 'metrics_names' : kwargs.get('metrics_names',{}) + self.classnames }
+        else:
+            self.learn.recorder.add_metric(self.classnames)
+    
+    def on_epoch_begin(self, **kwargs):
+        self.stats = []    
+    
+    def on_batch_end(self, last_output, last_target, **kwargs):
+        last_output = last_output.detach()
+        if self.activation: last_output = self.activation(last_output)
+        xs = class_weights(last_output)
+        ys = class_weights(last_target)
+        self.stats.append( (xs-ys).abs() )
+    
+    def on_epoch_end(self, **kwargs):
+        cumstats = torch.stack(self.stats).mean((0,))
+        return { 'last_metrics': kwargs.get('last_metrics',{}) + cumstats.tolist() }
+
+
 class DiceMetric(LearnerCallback):
     """Report the dice index.  (larger is better)"""
     _order = -10
