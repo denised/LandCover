@@ -48,9 +48,8 @@ class TrainTracker(LearnerCallback):
     Various mechanisms are used to obtain the data stored.
      * Values are stored in the 'parameters' field of Learner.  TrainTracker has default methods to set most of them, but Learner
        can set them first, or override them afterwards.  A few values must be set by the Learner.
-     * Optimizers and Loss Functions are searched for a tracker_description method or attribute.  If found, that is used
-       to identify the respective object.  If it is not found, a default mechanism is used to identify Loss Functions or Optimizers.
-    *  Adds an extra parameter to models before saving to allow them to store and recover the train_id.
+    *  Models are watermarked (by adding an extra buffer containing the training id) so it is possible to identify the exact training
+       run that generated them.  (And if the same model is built up over time, the sequence of runs involved can be tracked.)
 
     This code is hardwired into the learner in this repo.  You do not need to manually add it to callbacks.
     """
@@ -96,12 +95,8 @@ class TrainTracker(LearnerCallback):
         return f"{self.started:%y%m%d.%H%M}.{mname:10.10}"
    
     def describe(self, ob):
-        """If the object has a tracker_description attribute, use that to produce the result.  Otherwise simply apply the str() method"""
-        if hasattr(ob, 'tracker_description'):
-            x = ob.tracker_description
-            return str(x() if callable(x) else x)
-        else:
-            return str(ob)
+        """If the object has a name attribute, use that to produce the result.  Otherwise simply apply the str() method"""
+        return str(getattr(ob, 'name', ob))
     
     @classmethod
     def describe_parameters(cls, learner, lr=None, wd=None, **kwargs):   # pylint: disable=unused-argument
@@ -200,5 +195,5 @@ class TrainTrackerWebHook(object):
 from fastai.torch_core import AdamW
 from .ranger import Ranger
 
-setattr(AdamW, "tracker_description", "AdamW")
-setattr(Ranger, "tracker_description", "Ranger")
+setattr(AdamW, "name", "AdamW")
+setattr(Ranger, "name", "Ranger")
