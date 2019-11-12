@@ -1,4 +1,5 @@
 from typing import Union
+from dataclasses import dataclass
 import numpy as np
 from torch.tensor import Tensor
 from matplotlib import pyplot
@@ -7,11 +8,10 @@ from matplotlib.cm import get_cmap
 from matplotlib.colors import ListedColormap
 from rasterio.io import DatasetReader
 from contextlib import contextmanager
-from collections import namedtuple
 from . import windows
+from . import bands as cbands
 import cycler
 import numbers
-
 
 # ###################################################################################################################
 #
@@ -43,8 +43,17 @@ def _plotstyle(ncols, nrows, imsize):
         "xtick.bottom" : False,
         "xtick.labelbottom" : False,
         "ytick.left": False,
-        "ytick.labelleft": False
+        "ytick.labelleft": False,
+        "image.cmap": "copper"
     }
+
+# colormap for categorical data (i.e. the output of collapse_bands).  This works up to 21 categories and the first value is black
+ccmap = ListedColormap( [np.array([0,0,0,1])] + list(get_cmap('tab20', 20).colors) )
+ccmap_vmax = 21  # specifying vmin, vmax to imshow will keep color use consistent across images that have different actual ranges
+cc_cycle = cycler.cycler(color=ccmap.colors)  # matching color cycler for plots
+
+# colormap for amplitude data.  Dark is 0, light is high.
+acmap = "copper"
 
 
 @contextmanager
@@ -80,7 +89,7 @@ def show_band(filep, band, level=64, showrect=None):
     # Hacky, but not worth figuring it out right now.
     with pyplot.style.context(_plotstyle(2,1,filep.shape)):
         plt = fig.add_subplot(1,2,1)
-        plt.imshow(dat)
+        plt.imshow(dat, vmin=0, vmax=255 )
         if showrect:
             _showrects(plt, showrect, level) 
 
@@ -95,7 +104,7 @@ def _show_file_bands(filep, ncols=3, level=64, showrect=None):
         dat = filep.read(out=_smaller(filep,level))
         for i in range(0, n):
             plt = fig.add_subplot( nrows, ncols, i+1 )
-            plt.imshow( dat[i] )
+            plt.imshow( dat[i], vmin=0, vmax=255 )
             if showrect:
                 _showrects(plt, showrect, level)
 
@@ -107,7 +116,7 @@ def _show_array_bands(arry, ncols=3):
         fig = pyplot.figure()
         for i in range(0, n):
             plt = fig.add_subplot( nrows, ncols, i+1 )
-            plt.imshow( arry[i] )
+            plt.imshow( arry[i], vmin=0, vmax=255 )
 
 def show_bands(fileOrArray, ncols=3, level=64, showrect=None):
     """Show reduced bands from a file, or full bands from an array, depending on the argument"""
@@ -125,7 +134,7 @@ def show_bits(dat, n=8, ncols=3):
         for i in range(0, n):
             plt = fig.add_subplot( nrows, ncols, i+1 )
             mask = 1<<i
-            plt.imshow( (dat&mask) >> i, cmap="Greys" )
+            plt.imshow( (dat&mask) >> i, vmin=0 )
 
 
 def _smaller(ds,factor=64):
@@ -168,11 +177,6 @@ def _is_image_array(imgs: ImageOrImages):
 
 def _as_numpy(x: ImageOrImages):
     return x.numpy() if isinstance(x,Tensor) else x
-
-# colormap for categorical data (i.e. the output of collapse_bands).  This works up to 21 categories and the first value is black
-ccmap = ListedColormap( [np.array([0,0,0,1])] + list(get_cmap('tab20', 20).colors) )
-ccmap_vmax = 21  # specifying vmin, vmax to imshow will keep color use consistent across images that have different actual ranges
-cc_cycle = cycler.cycler(color=ccmap.colors)  # matching color cycler for plots
 
 
 # In the functions below, we are generally singling out the dimension corresponding to 'band' for special treatment.
@@ -236,53 +240,52 @@ def find_interesting(imgs: ImageOrImages, band=None, howmany=10):
 # Side-by-side comparison of inputs, predictions and targets
 
 # A named tuple for the results of get_prediction_set
-PredictionSet = namedtuple('PredictionSet', ['windows','inputs','predictions','targets','losses'])
+
+@dataclass
+class PredictionSet(object):
+    windows: windows.WindowList
+    inputs: np.ndarray
+    predictions: np.ndarray
+    targets: np.ndarray
+
+    def __getitem__(self, i):
+        if isinstance(i, slice):
+            return PredictionSet(self.windows[i], self.inputs[i], self.predictions[i], self.targets[i] )
+        else: # switch to a simple tuple...
+            return (self.windows[i], self.inputs[i], self.predictions[i], self.targets[i])
     
-def get_prediction_set(learner, x_data: windows.WindowList) -> PredictionSet:
-    """Get predictions for specific data and return the correlated results.  Like learner.get_preds except that
-    it also returns the original data."""
-    x_dataset = learner.create_dataset(x_data)
+def get_prediction_set(learner, x_data: windows.WindowList, *args, **kwargs) -> PredictionSet:
+    """Get predictions for specific data and return the correlated results."""
+    x_dataset = learner.create_dataset(x_data, *args, **kwargs)
     with learner.temporary_validation_set(x_dataset):
-        preds = learner.get_preds(with_loss=True)
+        preds = learner.get_preds()
     return PredictionSet(x_data, np.stack(list(windows.read_windowList(x_data))), *preds)
 
-def subset_predictions(pred_set: PredictionSet, min_idx=None, max_idx=None) -> PredictionSet:
-    sl = slice(min_idx,max_idx)
-    return PredictionSet(*[x[sl] for x in pred_set])
-
 def collapse_predictions(pred_set: PredictionSet) -> PredictionSet:
-    """Collapse each of the predictions and targets in preds via collapse_bands.  The error metric is replaced with a 
-    boolean matrix of agreement between the prediction and target."""
+    """Collapse each of the predictions and targets in preds via collapse_bands."""
     cb_preds = collapse_bands(pred_set.predictions)
     cb_targets = collapse_bands(pred_set.targets)
-    return PredictionSet( pred_set.windows, pred_set.inputs, cb_preds, cb_targets, np.not_equal(cb_preds, cb_targets))
+    return PredictionSet( pred_set.windows, pred_set.inputs, cb_preds, cb_targets)
 
-def sort_predictions(pred_set: PredictionSet, ascending=False) -> PredictionSet:
-    """Order predictions by losses.  By default, show worst matches first"""
-    # TODO
-    return pred_set
-
-def show_predictions(pred_set: PredictionSet, bands=None):
-    """Show side-by-side inputs, predictions, targets and error.
+def show_predictions(pred_set: PredictionSet, bands=None, bandnames=None):
+    """Show side-by-side inputs, predictions and targets.
     If bands is set it should be an integer or list of band numbers indicating which bands to show."""
     
-    (_, inputs, preds, targets, errs) = pred_set
+    (inputs, preds, targets) = (pred_set.inputs, pred_set.predictions, pred_set.targets)
     tshape = preds.shape  # shape of the tensors
     is_collapsed = (tshape[1] == 1)  # collapsed data has a single band.
     if bands is None:
-        bands = range(1, tshape[1]+1)  # number of bands, starting at 1
+        bands = range(tshape[1])
+    elif isinstance(bands, int):
+        bands = [bands]
     nbands = len(bands)
     nrows = tshape[0] * nbands
-    ncols = 4
+    ncols = 3
     imshape = tshape[-2:] # shape of each image (the last two dimensions of the tensor)
+    bandnames = bandnames or cbands.CORINE_BANDS
     
     # establish normalization ranges so the heatmaps will all have the same reference
     predmax = max( preds.max(), targets.max() )
-    errmin = min( errs.min(), 0 )
-    errmax = max( errs.max(), 1 )
-
-    # intuitive colormap for representing magnitude data
-    cmap = "pink_r"
 
     with pyplot.style.context(_plotstyle(ncols, nrows, imshape)):
         fig = pyplot.figure()
@@ -290,34 +293,25 @@ def show_predictions(pred_set: PredictionSet, bands=None):
             for j,b in enumerate(bands): # per band
                 figno = (i*nbands*ncols) + (j*ncols) + 1
 
-                # add four figures:
+                # add three figures:
                 # input figure
-                ax0 = fig.add_subplot( nrows, ncols, figno)
                 if j == 0:  # only show satelite image for first band in the case of multi-band output
+                    ax0 = fig.add_subplot( nrows, ncols, figno)
                     ax0.imshow( bands_to_image(inputs[i]) )
+                    ax0.set_title(f"Image #{i}", loc='left')
 
                 # prediction figure:
                 ax1 = fig.add_subplot( nrows, ncols, figno+1)
                 if is_collapsed:
                     show_categorical_img( preds[i,0], ax1 )
                 else:
-                    ax1.imshow( preds[i,b-1], vmin=0, vmax=predmax, cmap=cmap )
+                    ax1.imshow( preds[i,b], vmin=0, vmax=predmax)
 
                 # target figure:
                 ax2 = fig.add_subplot( nrows, ncols, figno+2 )
                 if is_collapsed:
                     show_categorical_img( targets[i,0], ax2 )
                 else:
-                    ax2.imshow( targets[i,b-1], vmin=0, vmax=predmax, cmap=cmap )
-
-                # error figure
-                ax3 = fig.add_subplot( nrows, ncols, figno+3 )
-                ax3.imshow( errs[i,b-1], vmin=errmin, vmax=errmax, cmap=cmap )
-                               
-                # provide a title
-                if is_collapsed:
-                    ax0.set_title("Image #{}".format(i), loc='left')
-                else:
-                    ax0.set_title("Image #{}, band {}".format(i, b), loc='left')
-        #return fig
+                    ax2.imshow( targets[i,b], vmin=0, vmax=predmax )
+                    ax2.set_title(f"{bandnames[b]} band", loc='right')
 
