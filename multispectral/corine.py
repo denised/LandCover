@@ -4,7 +4,6 @@ import numpy as np
 from pathlib import Path
 from . import coords
 from . import bands
-from pathlib import Path
 from fastai.basics import defaults
    
 def bi(srcname,band):
@@ -79,8 +78,8 @@ def corine_labeler(lsdat:rasterio.io.DatasetReader, region:windows.Window):
     c_nodata = (c_data[bi('corine','mask')] == 0)
 
     # Unpack the cloud and shadow data from the landsat data and transfer it as channels to the target data
-    cloud = ((qa & bands.PIXEL_QA['cloud']) != 0)
-    shadow = ((qa & bands.PIXEL_QA['shadow']) != 0)
+    cloud = ((qa & bands.PIXEL_QA['cloud']) != 0) * 255
+    shadow = ((qa & bands.PIXEL_QA['shadow']) != 0) * 255
     c_data = np.append( c_data, [cloud, shadow], axis=0 )
 
     # Synchronize the nodata in both

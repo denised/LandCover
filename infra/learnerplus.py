@@ -117,7 +117,7 @@ class LearnerPlus(Learner):
         """Initialize additional learner state specific to LearnerPlus.  kwargs adds to or overrides this state."""
         # See the documentation at the top of traintracker for the fields and their meanings:
         self.parameters = {
-            "code_marker" : "classifier includes mask band",  # hardwired description of significant code update
+            "code_marker" : "cloud label fix",  # hardwired description of significant code update
         }
         self.parameters.update(kwargs)
         self.callback_fns.insert(0,TrainTracker)
