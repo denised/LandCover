@@ -6,7 +6,7 @@ from fastai import *
 from fastai.basics import *
 from multispectral import windows
 from multispectral import tools
-import neptune
+#import neptune
 import infra
 import zoo
 
@@ -20,7 +20,7 @@ parser.add_argument("--test_run", help="Run with a minimal dataset size to verif
 args = parser.parse_args()
 
 windows_list = os.environ['LANDSAT_DIR'] + '/all_windows.csv'
-neptune_project = neptune.init('denised/landcover')
+#neptune_project = neptune.init('denised/landcover')
 infra.set_defaults(
     corine_directory=os.environ['CORINE_DIR'],
     traintracker_store=infra.TrainTrackerWebHook(os.environ['TRAINTRACKER_URI'])
@@ -34,7 +34,6 @@ if args.test_run:
 
 #ender = infra.TrainEnder()
 #infra.set_defaults(train_end=4)
-infra.set_defaults(bs=4,silent=True)
 if args.cpu:
     infra.set_defaults(device=torch.device('cpu'))
 
@@ -47,12 +46,10 @@ def idname(learner):
 
 def save_sample(learner,data):
     """Save a little bit of data with predictions and targets, so we can explore without reloading"""
-    predset = tools.get_prediction_set(learner,data)
-    # convert tensors to numpy
-    predset = ( x.numpy() if isinstance(x,torch.Tensor) else x for x in predset )
+    predset = tools.get_prediction_set(learner,data).to_numpy()
     filename = model_dir / (idname(learner) + "_sample.pkl")
     pickle.dump( predset, filename )
-
+    return filename
 
 def run_one(description=None, epochs=None, starting_from=None):
     description = description if description is not None else args.description
@@ -64,9 +61,7 @@ def run_one(description=None, epochs=None, starting_from=None):
     monitor=infra.CycleHandler.create(n=monitor_frequency, callbacks=[
         infra.DiceMetric, 
         infra.GradientMetrics, 
-        infra.LearnedClassesMetric,
-        infra.CSVLogger(logfilename,'a'), 
-        infra.SendToNeptune])
+        infra.CSVLogger(logfilename,'a')])
          
     learner = zoo.MultiUResNet.create(tr_list, val_list, callbacks=[], callback_fns=[monitor])
     if starting_from: # begin with existing weights
@@ -80,7 +75,15 @@ def run_one(description=None, epochs=None, starting_from=None):
         torch.save(learner.model.state_dict(), name)
 
     # save a sample to look at.
-    #save_sample(learner, tr_list[:40])
+    samplename = save_sample(learner, tr_list[:100])
+
+    # upload log file and sample file
+    try:
+        os.system(f"gdrive upload -p 1J-laJXulHFxVQT3L3ZwRRdlyyGbDOhSo {logfilename}")
+        os.system(f"gdrive upload -p 1J-laJXulHFxVQT3L3ZwRRdlyyGbDOhSo {samplename}")
+        os.system(f"mv {logfilename} logs")
+    except:
+        pass
     
 try:
     run_one()

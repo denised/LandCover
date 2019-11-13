@@ -8,6 +8,7 @@ from matplotlib.cm import get_cmap
 from matplotlib.colors import ListedColormap
 from rasterio.io import DatasetReader
 from contextlib import contextmanager
+from infra import defaults
 from . import windows
 from . import bands as cbands
 import cycler
@@ -134,7 +135,22 @@ def show_bits(dat, n=8, ncols=3):
         for i in range(0, n):
             plt = fig.add_subplot( nrows, ncols, i+1 )
             mask = 1<<i
-            plt.imshow( (dat&mask) >> i, vmin=0 )
+            plt.imshow( dat&mask, vmin=0 )
+
+def show_qa_bits(dat, ncols=3):
+    """Show the landsat qa bits from landsat data"""
+    # check whether we got the one band or all of them
+    if len(dat.shape) > 2:
+        dat = dat[ cbands.band_index(cbands.LANDSAT_BANDS, 'qa') ]
+    n = len(cbands.PIXEL_QA)
+    nrows = (n//ncols) + (1 if n%ncols else 0)
+    with pyplot.style.context(_plotstyle(ncols, nrows, dat.shape)):
+        fig = pyplot.figure()
+        for i,b in enumerate(cbands.PIXEL_QA):
+            plt = fig.add_subplot( nrows, ncols, i+1 )
+            mask = cbands.PIXEL_QA[b]
+            plt.imshow( dat&mask, vmin=0 )
+            plt.set_title(f"{b}:{mask}")
 
 
 def _smaller(ds,factor=64):
@@ -143,18 +159,23 @@ def _smaller(ds,factor=64):
     return np.empty(shape=(ds.count, ds.height//factor, ds.width//factor), dtype=ds.dtypes[0])
 
 
-def bands_to_image(dat, rb=2, gb=1, bb=0):
+def bands_to_image(dat, rb=2, gb=1, bb=0, bright=3):
     """Given satellite band data, turn the first three bands into a traditional image format with crude brightness correction.
     By changing the bands used for rb, gb and bb, you can make false-color images in the same way."""
     def norm(x):
-        minv = x.min()
-        maxv = x.max()
-        return (x - minv) / (maxv - minv)
+        x = x * bright
+        x[x>1] = 1.0
+        return x
     red = norm(dat[rb])
     green = norm(dat[gb])
     blue = norm(dat[bb])
-    
     return np.dstack( (red, green, blue) )
+
+def show_registration(x,y, band=1):
+    """Overlay the source data (x) with the requested band from the target data.  
+    (Band '1' is water, which is good for for registration if the image has any)"""
+    pyplot.imshow(bands_to_image(x))
+    pyplot.imshow(y[band],alpha=0.3)
 
 
 # ###################################################################################################################
@@ -206,23 +227,6 @@ def show_categorical_img(img, ax=None):
     with with_axes(ax) as (_,ax):
         ax.imshow(img, interpolation='nearest', cmap=ccmap, vmin=0, vmax=ccmap_vmax)
 
-_statpoints = [0, 0.2, 0.5, 0.8, 1.0]  # quantiles returned by image-stats
-def image_stats(imgs: ImageOrImages):
-    """Return a set of quantile values for each band across an image or set of images."""
-    axes = (0, 2, 3) if _is_image_array(imgs) else (1, 2)
-    return np.quantile(_as_numpy(imgs), _statpoints, axis=axes).transpose()
-
-def plot_image_stats(imgs: ImageOrImages, band_labels = None, ax=None):
-    """Show the statistics for the image/image set.  Set band_labels to a list of band names, e.g. bands.CORINE_BANDS"""
-    stats = list(image_stats(imgs))
-    if band_labels is None:
-        band_labels = range(len(stats))
-    with pyplot.style.context({'axes.prop_cycle': cc_cycle}):
-        with with_axes(ax) as (_,ax):
-            for blab, bstat in zip(band_labels, stats):
-                ax.plot(_statpoints, bstat, 's-', label=blab)
-            ax.legend()
-
 def find_interesting(imgs: ImageOrImages, band=None, howmany=10):
     """Return some of the first-found 'interesting' data (data that is *between*
     0 and 1) within imgs.  If bands is specified, limit to that band.
@@ -233,6 +237,26 @@ def find_interesting(imgs: ImageOrImages, band=None, howmany=10):
     dat[dat>=1] = 0
     dat = dat[dat>0]
     return dat[:howmany] if howmany < len(dat) else dat
+
+
+def pixel_trace(imgs: ImageOrImages, pixel=None, bands=None, band_labels=None, ax=None):
+    """Plot a trace of the band values for a specific pixel across all images in array.
+    This is good for showing how 'convinced' a learner is (how strongly it predicts each class),
+    as well as trends in the data.
+    imgs should be an array of images."""
+    band_labels = band_labels or defaults.classnames
+    if bands is None:
+        bands = range(imgs.shape[1])
+    elif isinstance(bands, int):
+        bands = [bands]
+    # default to middle of the image
+    (x,y) = pixel or (int(imgs.shape[2]/2), int(imgs.shape[3]/2))
+
+    dat = _as_numpy(imgs)
+    with with_axes(ax) as (_,ax):
+        for b in bands:
+            ax.plot( dat[:,b,x,y], label=band_labels[b], color=ccmap(b) )
+        ax.legend()
 
 
 # ###################################################################################################################
@@ -253,6 +277,9 @@ class PredictionSet(object):
             return PredictionSet(self.windows[i], self.inputs[i], self.predictions[i], self.targets[i] )
         else: # switch to a simple tuple...
             return (self.windows[i], self.inputs[i], self.predictions[i], self.targets[i])
+    
+    def to_numpy(self):
+        return PredictionSet( self.windows, _as_numpy(self.inputs), _as_numpy(self.predictions), _as_numpy(self.targets) )
     
 def get_prediction_set(learner, x_data: windows.WindowList, *args, **kwargs) -> PredictionSet:
     """Get predictions for specific data and return the correlated results."""
@@ -282,10 +309,7 @@ def show_predictions(pred_set: PredictionSet, bands=None, bandnames=None):
     nrows = tshape[0] * nbands
     ncols = 3
     imshape = tshape[-2:] # shape of each image (the last two dimensions of the tensor)
-    bandnames = bandnames or cbands.CORINE_BANDS
-    
-    # establish normalization ranges so the heatmaps will all have the same reference
-    predmax = max( preds.max(), targets.max() )
+    bandnames = bandnames or defaults.classnames
 
     with pyplot.style.context(_plotstyle(ncols, nrows, imshape)):
         fig = pyplot.figure()
@@ -305,13 +329,13 @@ def show_predictions(pred_set: PredictionSet, bands=None, bandnames=None):
                 if is_collapsed:
                     show_categorical_img( preds[i,0], ax1 )
                 else:
-                    ax1.imshow( preds[i,b], vmin=0, vmax=predmax)
+                    ax1.imshow( preds[i,b], vmin=0, vmax=1)
 
                 # target figure:
                 ax2 = fig.add_subplot( nrows, ncols, figno+2 )
                 if is_collapsed:
                     show_categorical_img( targets[i,0], ax2 )
                 else:
-                    ax2.imshow( targets[i,b], vmin=0, vmax=predmax )
+                    ax2.imshow( targets[i,b], vmin=0, vmax=1 )
                     ax2.set_title(f"{bandnames[b]} band", loc='right')
 
