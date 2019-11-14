@@ -66,15 +66,21 @@ def to_file(windows:WindowList, file_name:str, append=False) -> None:
         for (rfp,win) in windows:
             print("{},{},{},{},{}".format(rfp.name,win.col_off,win.row_off,win.width,win.height), file=fp)
 
+
 _open_files = {}
+def shared_windows_fp(name):
+    """Cached rasterio file pointers."""
+    if name not in _open_files.keys():
+        _open_files[name] = rasterio.open(name)
+    return _open_files[name]
+
+
 def from_file(file_name:str) -> WindowList:
     """Return an iterable list of windows from a file stored as a csv.  Uses/keeps a reusable list of open rasterio file pointers."""
     with open(file_name,'r') as fp:
         for line in fp:
             (name,col_off,row_off,width,height) = line.split(',')
-            if name not in _open_files.keys():
-                _open_files[name] = rasterio.open(name)
-            yield (_open_files[name], Window(int(col_off),int(row_off),int(width),int(height)))
+            yield (shared_windows_fp(name), Window(int(col_off),int(row_off),int(width),int(height)))
 
 
 def read_windowList(lst: WindowList) -> Iterable[np.ndarray]:

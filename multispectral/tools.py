@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, Sequence, Tuple
 from dataclasses import dataclass
 import numpy as np
 from torch.tensor import Tensor
@@ -8,7 +8,7 @@ from matplotlib.cm import get_cmap
 from matplotlib.colors import ListedColormap
 from rasterio.io import DatasetReader
 from contextlib import contextmanager
-from infra import defaults
+from infra import defaults, LearnerPlus
 from . import windows
 from . import bands as cbands
 import cycler
@@ -267,21 +267,41 @@ def pixel_trace(imgs: ImageOrImages, pixel=None, bands=None, band_labels=None, a
 
 @dataclass
 class PredictionSet(object):
-    windows: windows.WindowList
-    inputs: np.ndarray
-    predictions: np.ndarray
-    targets: np.ndarray
+    windows: Union[windows.WindowList, Sequence[Tuple[str, windows.Window]]]
+    inputs: Union[Tensor, np.ndarray]
+    predictions: Union[Tensor, np.ndarray]
+    targets: Union[Tensor, np.ndarray]
 
     def __getitem__(self, i):
         if isinstance(i, slice):
-            return PredictionSet(self.windows[i], self.inputs[i], self.predictions[i], self.targets[i] )
+            return PredictionSet( self.windows[i], self.inputs[i], self.predictions[i], self.targets[i] )
         else: # switch to a simple tuple...
             return (self.windows[i], self.inputs[i], self.predictions[i], self.targets[i])
     
     def to_numpy(self):
         return PredictionSet( self.windows, _as_numpy(self.inputs), _as_numpy(self.predictions), _as_numpy(self.targets) )
     
-def get_prediction_set(learner, x_data: windows.WindowList, *args, **kwargs) -> PredictionSet:
+    def __getstate__(self):
+        # Substitute filename / window tuples for the Datareader / window tuples
+        if len(self.windows) and not isinstance(self.windows[0][0], str):
+            state = self.__dict__.copy()
+            state['windows'] = [ (f.name, w) for (f,w) in self.windows ]
+            return state
+        else: # no change required
+            return self.__dict__
+    
+    # Note: there is no __setstate__ to automatically reverse the transformation above.  That is because the prediction set
+    # might be constructed on a machine that does not have access to the files (or not at the same locations).  So
+    # by default they will be created as (filename, window) pairs. You must manually use the open_files method below
+    # to convert them in to (Datareader, window) pairs.
+    
+    def open_files(self):
+        """If this prediction set has file names in its window list, convert to open-file form."""
+        if len(self.windows) and isinstance(self.windows[0][0], str):
+            self.windows = [ (windows.shared_windows_fp(name), w) for (name, w) in self.windows ]
+
+   
+def get_prediction_set(learner:LearnerPlus, x_data: windows.WindowList, *args, **kwargs) -> PredictionSet:
     """Get predictions for specific data and return the correlated results."""
     x_dataset = learner.create_dataset(x_data, *args, **kwargs)
     with learner.temporary_validation_set(x_dataset):

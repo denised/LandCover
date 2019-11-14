@@ -2,6 +2,7 @@
 import argparse
 import datetime
 import platform
+import pickle
 from fastai import *
 from fastai.basics import *
 from multispectral import windows
@@ -18,6 +19,9 @@ parser.add_argument("--save", help="Save resulting model(s)", action='store_true
 parser.add_argument("--cpu", help="Run on cpu", action='store_true')
 parser.add_argument("--test_run", help="Run with a minimal dataset size to verify code works", action='store_true')
 args = parser.parse_args()
+
+# identity of directory to store things in.
+gdrive_params = "-p 1J-laJXulHFxVQT3L3ZwRRdlyyGbDOhSo"
 
 windows_list = os.environ['LANDSAT_DIR'] + '/all_windows.csv'
 #neptune_project = neptune.init('denised/landcover')
@@ -48,7 +52,8 @@ def save_sample(learner,data):
     """Save a little bit of data with predictions and targets, so we can explore without reloading"""
     predset = tools.get_prediction_set(learner,data).to_numpy()
     filename = model_dir / (idname(learner) + "_sample.pkl")
-    pickle.dump( predset, filename )
+    with open(filename, 'wb') as fp:
+        pickle.dump( predset, fp )
     return filename
 
 def run_one(description=None, epochs=None, starting_from=None):
@@ -78,12 +83,14 @@ def run_one(description=None, epochs=None, starting_from=None):
     samplename = save_sample(learner, tr_list[:100])
 
     # upload log file and sample file
+    # This requires gdrive to be installed (and of course you need your own account/folder to put things in)
     try:
-        os.system(f"gdrive upload -p 1J-laJXulHFxVQT3L3ZwRRdlyyGbDOhSo {logfilename}")
-        os.system(f"gdrive upload -p 1J-laJXulHFxVQT3L3ZwRRdlyyGbDOhSo {samplename}")
+        os.system(f"gdrive upload {gdrive_params} {logfilename}")
+        os.system(f"gdrive upload {gdrive_params} {samplename}")
         os.system(f"mv {logfilename} logs")
-    except:
-        pass
+    except Exception as e:
+        # just print and continue
+        print(e)
     
 try:
     run_one()
