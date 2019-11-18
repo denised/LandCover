@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torchvision.models.resnet import BasicBlock, Bottleneck, ResNet
+import segmentation_models_pytorch as smp
 from fastai.basics import *
 from fastai import vision
 from multispectral import windows
@@ -173,4 +174,53 @@ def weighted_mse(x,y):
     er2 = (er * er).mean((0,))
     wer2 = class_weights * er2
     return wer2.sum()
+
+
+# ######################################################################
+#  Try some other RGB Networks
+
+class SMPModel(LearnerPlus):
+    """Wraps one of the segmentation models"""
+
+    @classmethod
+    def create_model(cls, encoder, decoder):
+        nets = { 'unet' : smp.Unet,
+                 'linknet': smp.Linknet,
+                 'fpn': smp.FPN,
+                 'pspnet': smp.PSPNet }
+        net = nets[decoder]
+        model = net(encoder, classes=len(bands.CORINE_BANDS), activation=None)
+        return model
+
+    @classmethod
+    def create_dataset(cls, input_data, encoder):   # pylint: disable=arguments-differ
+        """Convert a windowlist into a windowed dataset with RGB channels only (discarding others)."""
+        preproc = smp.encoders.get_preprocessing_params(encoder)
+        mean = np.array(preproc['mean'], dtype='float32').reshape((3,1,1))
+        std = np.array(preproc['std'], dtype='float32').reshape((3,1,1))
+        def rgb_label(lsdat, region, mean=mean, std=std):
+            x,y = corine.corine_labeler(lsdat,region)
+            # landsat band ordering is bgr, not rgb, so we have to reorder them as well
+            xrgb = np.stack([x[2],x[1],x[0]])
+            # ... and make them match imagenet standards
+            xrgb = (xrgb - mean) / std
+            return xrgb,y
+        return windows.WindowedDataset(input_data, rgb_label, *corine.corine_attributes())
+    
+    @classmethod
+    def create(cls, tr_data, val_data, encoder=None, decoder=None, bs=None, **kwargs):
+        l_args, d_args = cls._init_args(**kwargs)
+
+        bs = ifnone(bs, defaults.batch_size)
+        tr_ds = cls.create_dataset(tr_data, encoder)
+        val_ds = cls.create_dataset(val_data,encoder)
+        databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **d_args)
+        arch_description = f"{cls.__name__} {encoder}/{decoder}"
+
+        model = cls.create_model(encoder, decoder)
+        
+        learner = Learner(databunch, model, **l_args)
+        learner.__class__ = cls
+        learner.init_tracking(arch=arch_description)  # pylint: disable=no-member
+        return learner
     
