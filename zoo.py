@@ -171,7 +171,7 @@ def weighted_mse(x,y):
     class_weights = class_weights.to( x.device )
     # separate assignments are easier to debug
     er = (x - y)
-    er2 = (er * er).mean((0,))
+    er2 = (er * er).mean(other_dimensions(er,1))
     wer2 = class_weights * er2
     return wer2.sum()
 

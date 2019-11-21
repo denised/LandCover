@@ -317,13 +317,13 @@ def dice(predicted, target):
     uplusi = (target + predicted).sum()
     return 2 * intersection / uplusi 
 
-def other_dimensions(ndims, exclude):
-    """Return a tuple of the dimensions up to ndims, _not_ including those in exclude."""
-    return list(set(range(ndims)) - set(listify(exclude)))
+def other_dimensions(t, exclude):
+    """Return a tuple of the dimensions of t, _not_ including those in exclude."""
+    return list(set(range(len(t.shape))) - set(listify(exclude)))
 
 def class_weights(t):
     """Return a vector of normalized weights, one for each class in t."""
-    other_dims = other_dimensions(len(t.shape), defaults.class_index)
+    other_dims = other_dimensions(t, defaults.class_index)
     wts = t.sum(other_dims)
     return wts / wts.sum()
 
@@ -334,7 +334,7 @@ def weighted_dice(predicted, target):
     wts = class_weights(target)
     wts = 1 / (wts * wts + 0.00001)
 
-    sumdims = other_dimensions(len(target.shape), defaults.class_index)
+    sumdims = other_dimensions(target, defaults.class_index)
     intersection = (target * predicted).sum(sumdims)
     intersection = (intersection * wts).sum()
 
