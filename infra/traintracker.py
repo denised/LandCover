@@ -96,7 +96,7 @@ class TrainTracker(LearnerCallback):
    
     def describe(self, ob):
         """If the object has a name attribute, use that to produce the result.  Otherwise simply apply the str() method"""
-        return str(getattr(ob, 'name', ob))
+        return getattr(ob, 'name', str(ob))
     
     @classmethod
     def describe_parameters(cls, learner, lr=None, wd=None, **kwargs):   # pylint: disable=unused-argument

@@ -192,13 +192,9 @@ class LearnerPlus(Learner):
     # ################################  Misc
     
     def device(self):
-        """Return the device this learner's buffers are on.  (Assumes they are all on the same device...)"""
-        # OK, I lied.  The first buffer is (or may be) a traintracker buffer, which is on the CPU.
-        # Grab the one after that instead.
-        # TODO: is there a way to make this more principled?
-        bfs = self.model.buffers()
-        skip = next(bfs)   # pylint: disable=unused-variable
-        return next(bfs).device
+        """Return the device this learner's parameters are on.  (Assumes they are all on the same device...)"""
+        ps = self.model.parameters()
+        return next(ps).device
 
 
 class DummyDataBunch(DataBunch):
