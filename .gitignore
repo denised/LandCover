@@ -6,3 +6,5 @@ Untitled*.ipynb
 *.pkl
 models
 /*.csv
+runs/*
+

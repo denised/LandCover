@@ -21,5 +21,6 @@ dependencies:
   - rasterio
   - fastai=1.0.54
   - pytorch=1.1.0
+  - tensorboard
   - pip:
     - neptune-client

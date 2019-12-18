@@ -43,13 +43,13 @@ class CycleHandler(LearnerCallback):
         self.callbacks = []
         for c in callbacks:
             if isinstance(c, Callback):
-                pass
+                if hasattr(c, 'setLearner'):
+                    c.setLearner(learner)
             elif isinstance(c, type):
                 c = c(learner)
-            elif callable(c):
+            else: 
+                assert callable(c)
                 c = AverageMetric(c)
-            else:
-                assert isinstance(c, Callback)
             self.callbacks.append(c)
     
     def _propagate(self, event_name, **cbstate):
