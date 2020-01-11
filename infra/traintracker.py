@@ -16,7 +16,7 @@ columns = [
     'data',        # Identification of data used for this experiment.
     'augmentation',# LS -- Identification of any data treatment / augmentation used
     'base_model',  # train_id of experiment that generated the model weights used to initialize this experiment.
-    'arch',        # LS -- Identification of the architecture used
+    'arch',        # LS -- Identification of the model architecture used
     'loss_func',   # Identification of the Loss Function used
     'optimizer',   # Identification of the optimizer used
     'invocation',  # LS -- Fit, vs fit-one-cycle, etc.
@@ -120,6 +120,12 @@ class TrainTracker(LearnerCallback):
             model.register_buffer('tracker_id', encoded_id)
         else:
             model.tracker_id = encoded_id
+    
+    @classmethod
+    def default_model_id(cls,model):
+        """If the model doesn't have an id already, put in a dummy"""
+        if not hasattr(model, 'tracker_id'):
+            cls.set_model_id(model, 'empty')
 
     @classmethod
     def get_model_id(cls, model):

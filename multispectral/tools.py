@@ -304,9 +304,10 @@ class PredictionSet(object):
 def get_prediction_set(learner:LearnerPlus, x_data: windows.WindowList, *args, **kwargs) -> PredictionSet:
     """Get predictions for specific data and return the correlated results."""
     x_dataset = learner.create_dataset(x_data, *args, **kwargs)
+    (inputs,_) = x_dataset[:]
     with learner.temporary_validation_set(x_dataset):
-        preds = learner.get_preds()
-    return PredictionSet(x_data, np.stack(list(windows.read_windowList(x_data))), *preds)
+        (preds, targets) = learner.get_preds()
+    return PredictionSet(x_data, inputs, preds, targets)
 
 def collapse_predictions(pred_set: PredictionSet) -> PredictionSet:
     """Collapse each of the predictions and targets in preds via collapse_bands."""

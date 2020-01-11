@@ -1,160 +1,109 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from torchvision.models.resnet import BasicBlock, Bottleneck, ResNet
+from torch.utils.data.dataset import Dataset
 import segmentation_models_pytorch as smp
 from fastai.basics import *
-from fastai import vision
 from multispectral import windows
 from multispectral import corine
 from multispectral import bands
 from infra import *
+from typing import *
 
 """Models for working with Landsat / Corine data"""
 
+# ###################################################################################################################
+# One of the ways we vary what we are doing is by changing how we interpret the data...
+
+def segmented_ms_dataset(input_data:windows.WindowList)->Dataset:
+    """Treat the data as a multispectral segmentation problem"""
+    return windows.WindowedDataset(input_data, corine.corine_labeler, *corine.corine_attributes())
+
+def classified_ms_dataset(input_data:windows.WindowList)->Dataset:
+    """Treat the data as a multispectral classification problem"""
+    return windows.WindowedDataset(input_data, corine.corine_classifier, *corine.corine_attributes())
+
+def segmented_rgb_dataset(input_data:windows.WindowList)->Dataset:
+    """Transform the input to rgb, use for segmentation"""
+    def rgb_label(lsdat, region):
+        x,y = corine.corine_labeler(lsdat,region)
+        # landsat band ordering is bgr, not rgb, so we have to reorder them as well
+        xrgb = np.stack([x[2],x[1],x[0]])
+        return xrgb,y
+    return windows.WindowedDataset(input_data, rgb_label, *corine.corine_attributes())
+
+def classified_rgb_dataset(input_data:windows.WindowList)->Dataset:
+    """Transform the input to rgb, use for classification"""
+    def rgb_label(lsdat, region):
+        x,y = corine.corine_classifier(lsdat,region)
+        # landsat band ordering is bgr, not rgb, so we have to reorder them as well
+        xrgb = np.stack([x[2],x[1],x[0]])
+        return xrgb,y
+    return windows.WindowedDataset(input_data, rgb_label, *corine.corine_attributes())
+
+def segmented_ms_band_dataset(input_data:windows.WindowList, sbands:List[int])->Dataset:
+    """Perform multispectral segmentation over a simplified target that has only the requested bands"""
+    def band_label(lsdat,region,sb=sbands):
+        x,y = corine.corine_labeler(lsdat,region)
+        y = y[sb]
+        return x,y
+    return windows.WindowedDataset(input_data, band_label, *corine.corine_attributes())
+
+
+# ###################################################################################################################
+# 
+# Models
+
 class Simple(LearnerPlus):
     """A simple sequence of (convolution, ReLU) pairs.  No up or down scaling."""
-    # Note this is *almost* exactly thes same as fastai simple_cnn, but just not quite:
-    # fastai simple_cnn has a flatten at the end, and we don't.
-   
-    @classmethod
-    def create_model(cls, channels=(6,25,11), conv_size=None):
+
+    def create_model(self, channels=(6,25,11), conv_size=None):
         """Channels is a sequence specifying how many channels there should be in between each layer; begins with #inputs and ends with #outputs
         Conv_size is the kernel size of each convolution.  Defaults to 3 for all layers."""
         nlayers = len(channels)-1
         conv_size = ifnone(conv_size, [3]*nlayers)
         layers = [ conv_layer( channels[i], channels[i+1], conv_size[i], padding=1 ) for i in range(nlayers) ]
         model = torch.nn.Sequential(*layers)
+        self.parameters['arch'] = f"{self.__class__.__name__} channels={channels} conv_size={conv_size or 'default'}"
         return model
     
-    @classmethod
-    def create_dataset(cls, input_data):
-        """Create a dataset from a WindowList"""
-        return windows.WindowedDataset(input_data, corine.corine_labeler, *corine.corine_attributes())
-       
-    @classmethod
-    def create(cls, tr_data, val_data, channels=(6,25,11), conv_size=None, bs=None, **kwargs):
-        """Create a learner with defaults."""
-        l_args, d_args = cls._init_args(**kwargs)
+    def create_dataset(self, input_data): 
+        return segmented_ms_dataset(input_data)
+
+
    
-        bs = ifnone(bs, defaults.batch_size)
-        tr_ds = cls.create_dataset(tr_data)
-        val_ds = cls.create_dataset(val_data)
-        databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **d_args)
-        arch_description = f"{cls.__name__} channels={channels} conv_size={conv_size or 'default'}"
 
-        model = cls.create_model(channels, conv_size)
-
-        learner = Learner(databunch, model, **l_args)
-        learner.__class__ = cls
-        learner.init_tracking(arch=arch_description)  # pylint: disable=no-member
-        return learner
-    
-
-class ImageUResNet(LearnerPlus):
-    """Use a classic imagenet trained Unet-resnet on only the RGB channels of the input data"""
-    # This is really a thin wrapper around fastai's unet_learner function that lets me set a few defaults and record choices.
-
-    @classmethod
-    def create_dataset(cls, input_data):
-        """Convert a windowlist into a windowed dataset with RGB channels only (discarding others)"""
-        def rgb_label(lsdat, region):
-            x,y = corine.corine_labeler(lsdat,region)
-            # landsat band ordering is bgr, not rgb, so we have to reorder them as well
-            xrgb = np.stack([x[2],x[1],x[0]])
-            return xrgb,y
-        return windows.WindowedDataset(input_data, rgb_label, *corine.corine_attributes())
-    
-    @classmethod
-    def create(cls, tr_data, val_data, arch=vision.models.resnet18, bs=None, **kwargs):
-        l_args, d_args = cls._init_args(**kwargs)
-
-        bs = ifnone(bs, defaults.batch_size)
-        tr_ds = cls.create_dataset(tr_data)
-        val_ds = cls.create_dataset(val_data)
-        databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **d_args)
-        arch_description = f"{cls.__name__} arch={arch}"
-
-        learner = vision.unet_learner(databunch, arch, **l_args)
-        learner.__class__ = cls
-        learner.init_tracking(arch=arch_description)  # pylint: disable=no-member
-        return learner
+class MResNetEncoder(smp.encoders.resnet.ResNetEncoder):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # replace the conv1 with a 6 channel input
+        self.conv1 = nn.Conv2d(6, 64, kernel_size=7, stride=2, padding=3, bias=False)
 
 
-class MultiUResNet(LearnerPlus):
-    """The same as UNet-ResNet, but accepting 6 input bands instead of 3"""
-    
-    standard_arches = {
-        'resnet18': (BasicBlock, [2, 2, 2, 2]),
-        'resnet34': (BasicBlock, [3, 4, 6, 3]),
-        'resnet50': (Bottleneck, [3, 4, 6, 3]),
-        'resnet101': (Bottleneck, [3, 4, 23, 3]),
-        'resnet152': (Bottleneck, [3, 8, 36, 3])
-    }
+# Now we have to add metadata for this to smp's metadata pool
+mresnet18 = smp.encoders.encoders['resnet18'].copy()
+mresnet18['encoder'] = MResNetEncoder
+smp.encoders.encoders.update({'mresnet18':mresnet18})
 
-    @classmethod
-    def create_resnet(cls, arch='resnet18'):
-        # Literally the only difference with a standard resnet is that the initial layer takes 6 channel
-        # input instead of 3.  So we create the model by creating a standard resnet then swapping out
-        # the first layer for the one we want.
-        (block, layers) = cls.standard_arches[arch]
-        model = ResNet(block, layers)
-        model.conv1 = nn.Conv2d(6, 64, kernel_size=7, stride=2, padding=3, bias=False)
+
+class SMPModel(LearnerPlus):
+    """Wraps one of the segmentation models"""
+
+    def create_model(self, encoder, decoder):
+        nets = { 'unet' : smp.Unet,
+                 'linknet': smp.Linknet,
+                 'fpn': smp.FPN,
+                 'pspnet': smp.PSPNet }
+        net = nets[decoder]
+        model = net(encoder, classes=len(bands.CORINE_BANDS), activation=None, encoder_weights=None, decoder_use_batchnorm=False)
+        self.parameters['arch'] = f"{self.__class__.__name__} {encoder}/{decoder}"
         return model
+
+    def create_dataset(self, input_data):
+        return segmented_ms_dataset(input_data)
     
-    @classmethod
-    def create_dataset(cls, input_data):
-        """Create a dataset from a WindowList"""
-        return windows.WindowedDataset(input_data, corine.corine_labeler, *corine.corine_attributes())
-
-    @classmethod
-    def create(cls, tr_data, val_data, arch='resnet18', bs=None, **kwargs):
-        l_args, d_args = cls._init_args(**kwargs)
-
-        bs = ifnone(bs, defaults.batch_size)
-        tr_ds = cls.create_dataset(tr_data)
-        val_ds = cls.create_dataset(val_data)
-        databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **d_args)
-        arch_description = f"{cls.__name__} arch={arch}"
-
-        genfn = lambda _, arch=arch : cls.create_resnet(arch)
-        learner = vision.unet_learner(databunch, genfn, pretrained=False, **l_args)
-        learner.__class__ = cls
-        learner.init_tracking(arch=arch_description)  # pylint: disable=no-member
-        return learner
 
 
-class MultiResClassifier(MultiUResNet):
-    """Build the same way we build a MultiUResNet, but build a classifier instead.  So no UNet, and 
-    change the target to be multi-label classification (presence or absence of each of the land use types)"""
-
-    @classmethod
-    def create_resnet(cls, arch='resnet18'):
-        (block, layers) = cls.standard_arches[arch]
-        model = ResNet(block, layers, num_classes=len(bands.CORINE_BANDS))   # <-- Add num_classes here.
-        model.conv1 = nn.Conv2d(6, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        return model
-    
-    @classmethod 
-    def create_dataset(cls, input_data):
-        return windows.WindowedDataset(input_data, corine.corine_classifier, *corine.corine_attributes())
-    
-    @classmethod
-    def create(cls, tr_data, val_data, arch='resnet18', bs=None, **kwargs):
-        l_args, d_args = cls._init_args(**kwargs)
-
-        bs = ifnone(bs, defaults.batch_size)
-        tr_ds = cls.create_dataset(tr_data)
-        val_ds = cls.create_dataset(val_data)
-        databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **d_args)
-        arch_description = f"{cls.__name__} arch={arch}"
-
-        model = cls.create_resnet(arch)
-        
-        learner = Learner(databunch, model, **l_args)
-        learner.__class__ = cls
-        learner.init_tracking(arch=arch_description)  # pylint: disable=no-member
-        return learner
 
 # does not include mask bit.. todo: add.
 class_counts = [507, 339, 783, 600, 145, 799, 811, 609, 544, 358]
@@ -173,54 +122,22 @@ def weighted_mse(x,y):
     er = (x - y)
     er2 = (er * er).mean(other_dimensions(er,1))
     wer2 = class_weights * er2
-    return wer2.sum()
+    return wer2.mean()
 
 
-# ######################################################################
-#  Try some other RGB Networks
+# class OptValidator(LearnerCallback):
+#     # pylint: disable=arguments-differ
+#     """See whether we are in fact improving the model _on the given data_"""
 
-class SMPModel(LearnerPlus):
-    """Wraps one of the segmentation models"""
-
-    @classmethod
-    def create_model(cls, encoder, decoder):
-        nets = { 'unet' : smp.Unet,
-                 'linknet': smp.Linknet,
-                 'fpn': smp.FPN,
-                 'pspnet': smp.PSPNet }
-        net = nets[decoder]
-        model = net(encoder, classes=len(bands.CORINE_BANDS), activation=None)
-        return model
-
-    @classmethod
-    def create_dataset(cls, input_data, encoder):   # pylint: disable=arguments-differ
-        """Convert a windowlist into a windowed dataset with RGB channels only (discarding others)."""
-        preproc = smp.encoders.get_preprocessing_params(encoder)
-        mean = np.array(preproc['mean'], dtype='float32').reshape((3,1,1))
-        std = np.array(preproc['std'], dtype='float32').reshape((3,1,1))
-        def rgb_label(lsdat, region, mean=mean, std=std):
-            x,y = corine.corine_labeler(lsdat,region)
-            # landsat band ordering is bgr, not rgb, so we have to reorder them as well
-            xrgb = np.stack([x[2],x[1],x[0]])
-            # ... and make them match imagenet standards
-            xrgb = (xrgb - mean) / std
-            return xrgb,y
-        return windows.WindowedDataset(input_data, rgb_label, *corine.corine_attributes())
+#     def on_step_end(self, last_input, last_target, last_loss, **kwargs):
+#         with self.learn.pause_training():
+#             with torch.no_grad():
+#                 updated_loss = fastai.basic_train.loss_batch(
+#                     self.learn.model,
+#                     last_input,
+#                     last_target,
+#                     self.learn.loss_func
+#                 )
+#         import pdb; pdb.set_trace()
     
-    @classmethod
-    def create(cls, tr_data, val_data, encoder=None, decoder=None, bs=None, **kwargs):
-        l_args, d_args = cls._init_args(**kwargs)
-
-        bs = ifnone(bs, defaults.batch_size)
-        tr_ds = cls.create_dataset(tr_data, encoder)
-        val_ds = cls.create_dataset(val_data,encoder)
-        databunch = DataBunch(tr_ds.as_loader(bs=bs), val_ds.as_loader(bs=bs), **d_args)
-        arch_description = f"{cls.__name__} {encoder}/{decoder}"
-
-        model = cls.create_model(encoder, decoder)
-        
-        learner = Learner(databunch, model, **l_args)
-        learner.__class__ = cls
-        learner.init_tracking(arch=arch_description)  # pylint: disable=no-member
-        return learner
-    
+#     # maybe finish this some day.

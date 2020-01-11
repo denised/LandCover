@@ -150,8 +150,14 @@ class WindowedDataset(torch.utils.data.dataset.Dataset):
         return len(self.windows)
     
     def __getitem__(self, index):
-        (fp,w) = self.windows[index]
-        return self.labeler(fp,w)
+        """Returns input, target pair"""
+        if isinstance(index, slice):
+            # collect inputs and targets into single ndarrays
+            pairs = [ self.labeler(*i) for i in self.windows[index] ]
+            return ( np.stack( i for (i,j) in pairs ), 
+                     np.stack( j for (i,j) in pairs )  )
+        else:
+            return self.labeler(*self.windows[index])
 
     def _set_item(self,index):
         # TODO: implement the extra bit that fastai needs.
