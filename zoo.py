@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data.dataset import Dataset
 import segmentation_models_pytorch as smp
+import torchvision
 from fastai.basics import *
 from multispectral import windows
 from multispectral import corine
@@ -48,6 +49,15 @@ def segmented_ms_band_dataset(input_data:windows.WindowList, sbands:List[int])->
         y = y[sb]
         return x,y
     return windows.WindowedDataset(input_data, band_label, *corine.corine_attributes())
+    
+def classified_ms_band_dataset(input_data:windows.WindowList, sbands:List[int])->Dataset:
+    """Perform multispectral segmentation over a simplified target that has only the requested bands"""
+    def band_label(lsdat,region,sb=sbands):
+        x,y = corine.corine_classifier(lsdat,region)
+        y = y[sb]
+        return x,y
+    return windows.WindowedDataset(input_data, band_label, *corine.corine_attributes())
+    
 
 
 # ###################################################################################################################
@@ -57,7 +67,7 @@ def segmented_ms_band_dataset(input_data:windows.WindowList, sbands:List[int])->
 class Simple(LearnerPlus):
     """A simple sequence of (convolution, ReLU) pairs.  No up or down scaling."""
 
-    def create_model(self, channels=(6,25,11), conv_size=None):
+    def create_model(self, channels=(7,25,11), conv_size=None):
         """Channels is a sequence specifying how many channels there should be in between each layer; begins with #inputs and ends with #outputs
         Conv_size is the kernel size of each convolution.  Defaults to 3 for all layers."""
         nlayers = len(channels)-1
@@ -71,23 +81,22 @@ class Simple(LearnerPlus):
         return segmented_ms_dataset(input_data)
 
 
-   
+# Multi-spectral versions of encoders for use with SMP  
 
 class MResNetEncoder(smp.encoders.resnet.ResNetEncoder):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # replace the conv1 with a 6 channel input
-        self.conv1 = nn.Conv2d(6, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        # replace the conv1 with a 7 channel input
+        self.conv1 = nn.Conv2d(7, 64, kernel_size=7, stride=2, padding=3, bias=False)
 
-
-# Now we have to add metadata for this to smp's metadata pool
+# Now add metadata for this to smp's metadata pool
 mresnet18 = smp.encoders.encoders['resnet18'].copy()
 mresnet18['encoder'] = MResNetEncoder
 smp.encoders.encoders.update({'mresnet18':mresnet18})
 
 
 class SMPModel(LearnerPlus):
-    """Wraps one of the segmentation models"""
+    """Wraps any of the segmentation models"""
 
     def create_model(self, encoder, decoder):
         nets = { 'unet' : smp.Unet,
@@ -104,6 +113,41 @@ class SMPModel(LearnerPlus):
     
 
 
+class BandedModel(LearnerPlus):
+    """ Learn a model for only a particular set of bands """
+    def __init__(self, tr_data, val_data, sbands, **kwargs):
+        self.bands = sbands
+        super().__init__(tr_data, val_data, **kwargs)
+        self.parameters['arch'] = f"{self.__class__.__name__} {self.bands}"
+    
+    def create_model(self, **kwargs):
+        return smp.Unet('mresnet18', classes=len(self.bands), activation=None, encoder_weights=None, decoder_use_batchnorm=False)
+    
+    def create_dataset(self, input_data):
+        return segmented_ms_band_dataset(input_data, self.bands)
+
+
+class BandedResnet(LearnerPlus):
+    """Ditto, but classifier only --- no segmentation"""
+    def __init__(self, tr_data, val_data, sbands, **kwargs):
+        self.bands = sbands
+        super().__init__(tr_data, val_data, **kwargs)
+        self.parameters['arch'] = f"{self.__class__.__name__} {self.bands}"
+    
+    def create_model(self, **kwargs):
+        # TODO: see if we can do this within SMP world instead.
+        model = torchvision.models.resnet18(num_classes=len(self.bands))
+        model.conv1 = nn.Conv2d(7, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        return model
+    
+    def create_dataset(self, input_data):
+        return classified_ms_band_dataset(input_data, self.bands)
+
+
+
+# ###################################################################################################################
+# 
+# A weighted loss function for our data
 
 # does not include mask bit.. todo: add.
 class_counts = [507, 339, 783, 600, 145, 799, 811, 609, 544, 358]

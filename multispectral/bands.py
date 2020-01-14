@@ -1,22 +1,24 @@
 # Lists of what are at each index in a Landsat file, a Corine file, etc.
 # This is mostly documentation, but might be used for code too.
 
-LANDSAT_BANDS = ('band1','band2','band3','band4','band5','band7','qa')
-LANDSAT_LOGICAL_BANDS = ('blue','green','red','NIR','SWIR1','SWIR2','qa')
+# The data that is in the landsat files has a 'qa' band at the end.
+# We replace that with a 'mask' band instead.
+LANDSAT_BANDS = ('band1','band2','band3','band4','band5','band7','mask')
+LANDSAT_LOGICAL_BANDS = ('blue','green','red','NIR','SWIR1','SWIR2','mask')
 
 # The corine bands 
 CORINE_BANDS = (
-    'mask',   # 1 if data, 0 if none
-    'water',
-    'barren',
-    'grass',
-    'shrub',
-    'wetlands',
-    'forest',
-    'farm',
-    'urban',
-    'cloud',  # added by merge
-    'shadow'  # added by merge
+    'mask',    # 0     1 if data, 0 if none
+    'water',   # 1
+    'barren',  # 2
+    'grass',   # 3
+    'shrub',   # 4
+    'wetlands',# 5
+    'forest',  # 6
+    'farm',    # 7
+    'urban',   # 8
+    'cloud',   # 9,  added by merge
+    'shadow'   # 10, added by merge
     )
 
 # Bit masks for items in the pixel qa band

@@ -69,9 +69,8 @@ def corine_labeler(lsdat:rasterio.io.DatasetReader, region:windows.Window):
 
     # get landsat dataset.
     ls_data = coords.padded_read(lsdat, region)
-    qa = ls_data[bi('landsat','qa')] 
+    qa = ls_data[bi('landsat','mask')] 
     ls_nodata = (qa == 0)
-    ls_data = np.delete(ls_data, bi('landsat','qa'), axis=0)  # we don't need the qa band in the ls_data
 
     # get the corine dataset.
     c_data = coords.padded_read(corine, corine_region) 
@@ -88,6 +87,9 @@ def corine_labeler(lsdat:rasterio.io.DatasetReader, region:windows.Window):
         c_data[:, either_nodata] = 0
     if np.any(c_nodata):   # propagate to tile
         ls_data[:, either_nodata] = 0
+    
+    # finally, set the qa band in the landsat data to the same as the mask band
+    ls_data[bi('landsat','mask')] = (either_nodata != 0) * 255
     
     # finally convert to 0..1 floats
     # both ls and c data are bytes with full range.

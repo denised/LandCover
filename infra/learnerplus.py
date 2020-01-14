@@ -21,7 +21,7 @@ class LearnerPlus(Learner):
         # self.parameters is a bunch of metadata used for tracking.
         # see keys at the top of traintracker.py
         self.parameters = {
-            "code_marker" : "learner rearchitect",  # hardwired description of significant code update
+            "code_marker" : "add mask to input",  # hardwired description of significant code update
             "arch" : self.__class__.__name__  # may be overridden by subclasses to add more info
         }
 

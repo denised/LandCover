@@ -191,8 +191,10 @@ class TrainTrackerWebHook(object):
     def emit(self, values):
         """values is a dictionary of field values to write.  Writing is append-only, so all the data about a single training
         run needs to be written in a single call."""
-        
-        return requests.post(self.service_uri, values).json()   # return value is just for debugging.
+        try:
+            x = requests.post(self.service_uri, values)  # pylint: disable=unused-variable
+        except:
+            pass
 
 #########################################################
 #  Make pretty descriptions for the two optimizers I use
