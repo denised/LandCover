@@ -12,6 +12,7 @@ def set_defaults(**overrides):
             batch_size = 4,
             loss_func = torch.nn.BCEWithLogitsLoss(),
             opt_func = Ranger,
+            fastai_wd = True,      # fastai learner should perform weight decay (set to false for no wd, or if optimizer does wd itself)
             metrics = [],
             model_directory = 'models',
             callback_fns = [],

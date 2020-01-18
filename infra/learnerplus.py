@@ -46,18 +46,18 @@ class LearnerPlus(Learner):
         raise NotImplementedError
 
     @classmethod
-    def _partition_args(cls, opt_func=None, loss_func=None, metrics=None, true_wd=True, bn_wd=True, wd=None, train_bn=True,
+    def _partition_args(cls, opt_func=None, loss_func=None, metrics=None, true_wd=None, bn_wd=True, wd=None, train_bn=True,
                         path=None, model_dir=None, callback_fns=None, callbacks=None, layer_groups=None, add_time=True, silent=None, 
                         **kwargs):
         """Pull out arguments for the learner class and set their defaults.  Returns a tuple (learner-args, other-args)"""
-        # Why we do this seemingly pointless thing:  this allows learner __init__ to accept a mixed kwargs that covers Learner and model
+        # Why we do this seemingly pointless thing:  this allows learner __init__ to accept a mixed kwargs that covers both Learner and model objects
         # Here we (a) separate the mixed kwargs into two lists, and (b) standardize the default values for the learner args (which include additional
         # defaults beyond what fastai does).
         learner_args = {
             'opt_func': ifnone(opt_func, defaults.opt_func),
             'loss_func': ifnone(loss_func, defaults.loss_func),
             'metrics': ifnone(metrics, defaults.metrics),
-            'true_wd': true_wd,
+            'true_wd': ifnone(true_wd, defaults.fastai_wd),
             'bn_wd': bn_wd,
             'wd': ifnone(wd, defaults.wd),
             'train_bn': train_bn,
